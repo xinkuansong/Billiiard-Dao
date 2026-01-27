@@ -1,0 +1,640 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AIM001 /* AimingSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_AIM001 /* AimingSystem.swift */; };
+		AIM002 /* DiamondSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_AIM002 /* DiamondSystem.swift */; };
+		APP001 /* BilliardTrainerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC001 /* BilliardTrainerApp.swift */; };
+		APP002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC002 /* ContentView.swift */; };
+		AUDIO001 /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_AUDIO001 /* AudioManager.swift */; };
+		COURSE001 /* CourseListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_COURSE001 /* CourseListView.swift */; };
+		HOME001 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_HOME001 /* HomeView.swift */; };
+		HOME002 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_HOME002 /* OnboardingView.swift */; };
+		MODEL001 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_MODEL001 /* UserProfile.swift */; };
+		PHYS001 /* PhysicsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS001 /* PhysicsEngine.swift */; };
+		RES001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ASSETS /* Assets.xcassets */; };
+		RES002 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = LAUNCH /* LaunchScreen.storyboard */; };
+		SCENE001 /* BilliardScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE001 /* BilliardScene.swift */; };
+		SCENE002 /* BilliardSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE002 /* BilliardSceneView.swift */; };
+		SET001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SET001 /* SettingsView.swift */; };
+		STAT001 /* StatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_STAT001 /* StatisticsView.swift */; };
+		TRAIN001 /* TrainingListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN001 /* TrainingListView.swift */; };
+		TRAIN002 /* TrainingDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN002 /* TrainingDetailView.swift */; };
+		TRAIN003 /* TrainingSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN003 /* TrainingSceneView.swift */; };
+		TRAIN004 /* TrainingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN004 /* TrainingConfig.swift */; };
+		TRAIN005 /* TrainingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN005 /* TrainingViewModel.swift */; };
+		UTIL001 /* PhysicsConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL001 /* PhysicsConstants.swift */; };
+		UTIL002 /* Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL002 /* Extensions.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		ASSETS /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E4237E0D2F294DF200FC8AE5 /* billiard_table.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = billiard_table.usdz; sourceTree = "<group>"; };
+		INFO /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		LAUNCH /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		PRODUCT /* BilliardTrainer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BilliardTrainer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		SRC001 /* BilliardTrainerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilliardTrainerApp.swift; sourceTree = "<group>"; };
+		SRC002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		SRC_AIM001 /* AimingSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AimingSystem.swift; sourceTree = "<group>"; };
+		SRC_AIM002 /* DiamondSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiamondSystem.swift; sourceTree = "<group>"; };
+		SRC_AUDIO001 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
+		SRC_COURSE001 /* CourseListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourseListView.swift; sourceTree = "<group>"; };
+		SRC_HOME001 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		SRC_HOME002 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		SRC_MODEL001 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
+		SRC_PHYS001 /* PhysicsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhysicsEngine.swift; sourceTree = "<group>"; };
+		SRC_SCENE001 /* BilliardScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilliardScene.swift; sourceTree = "<group>"; };
+		SRC_SCENE002 /* BilliardSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilliardSceneView.swift; sourceTree = "<group>"; };
+		SRC_SET001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		SRC_STAT001 /* StatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsView.swift; sourceTree = "<group>"; };
+		SRC_TRAIN001 /* TrainingListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingListView.swift; sourceTree = "<group>"; };
+		SRC_TRAIN002 /* TrainingDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingDetailView.swift; sourceTree = "<group>"; };
+		SRC_TRAIN003 /* TrainingSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingSceneView.swift; sourceTree = "<group>"; };
+		SRC_TRAIN004 /* TrainingConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingConfig.swift; sourceTree = "<group>"; };
+		SRC_TRAIN005 /* TrainingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingViewModel.swift; sourceTree = "<group>"; };
+		SRC_UTIL001 /* PhysicsConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhysicsConstants.swift; sourceTree = "<group>"; };
+		SRC_UTIL002 /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		FRAMEWORKS /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AIMING_GROUP /* Aiming */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_AIM001 /* AimingSystem.swift */,
+				SRC_AIM002 /* DiamondSystem.swift */,
+			);
+			path = Aiming;
+			sourceTree = "<group>";
+		};
+		APP_GROUP /* App */ = {
+			isa = PBXGroup;
+			children = (
+				SRC001 /* BilliardTrainerApp.swift */,
+				SRC002 /* ContentView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		AUDIO_GROUP /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_AUDIO001 /* AudioManager.swift */,
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+		CAMERA_GROUP /* Camera */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Camera;
+			sourceTree = "<group>";
+		};
+		CHALLENGE_GROUP /* Challenge */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Challenge;
+			sourceTree = "<group>";
+		};
+		CONSTANTS_GROUP /* Constants */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_UTIL001 /* PhysicsConstants.swift */,
+			);
+			path = Constants;
+			sourceTree = "<group>";
+		};
+		CORE_GROUP /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				PHYSICS_GROUP /* Physics */,
+				AIMING_GROUP /* Aiming */,
+				CAMERA_GROUP /* Camera */,
+				SCENE_GROUP /* Scene */,
+				AUDIO_GROUP /* Audio */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		COURSE_GROUP /* Course */ = {
+			isa = PBXGroup;
+			children = (
+				COURSE_VIEWS_GROUP /* Views */,
+			);
+			path = Course;
+			sourceTree = "<group>";
+		};
+		COURSE_VIEWS_GROUP /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_COURSE001 /* CourseListView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		EXTENSIONS_GROUP /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_UTIL002 /* Extensions.swift */,
+			);
+			path = Extensions;
+			sourceTree = "<group>";
+		};
+		FEATURES_GROUP /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				HOME_GROUP /* Home */,
+				COURSE_GROUP /* Course */,
+				TRAINING_GROUP /* Training */,
+				CHALLENGE_GROUP /* Challenge */,
+				STATISTICS_GROUP /* Statistics */,
+				SETTINGS_GROUP /* Settings */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		HOME_GROUP /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				HOME_VIEWS_GROUP /* Views */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		HOME_VIEWS_GROUP /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_HOME001 /* HomeView.swift */,
+				SRC_HOME002 /* OnboardingView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		MAIN_GROUP /* BilliardTrainer */ = {
+			isa = PBXGroup;
+			children = (
+				APP_GROUP /* App */,
+				FEATURES_GROUP /* Features */,
+				CORE_GROUP /* Core */,
+				SERVICES_GROUP /* Services */,
+				MODELS_GROUP /* Models */,
+				RESOURCES_GROUP /* Resources */,
+				UTILITIES_GROUP /* Utilities */,
+				INFO /* Info.plist */,
+				E4237E0D2F294DF200FC8AE5 /* billiard_table.usdz */,
+			);
+			path = BilliardTrainer;
+			sourceTree = "<group>";
+		};
+		MODELS_GROUP /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_MODEL001 /* UserProfile.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		PHYSICS_GROUP /* Physics */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_PHYS001 /* PhysicsEngine.swift */,
+			);
+			path = Physics;
+			sourceTree = "<group>";
+		};
+		PRODUCTS_GROUP /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				PRODUCT /* BilliardTrainer.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		RESOURCES_GROUP /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				ASSETS /* Assets.xcassets */,
+				LAUNCH /* LaunchScreen.storyboard */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		ROOT = {
+			isa = PBXGroup;
+			children = (
+				MAIN_GROUP /* BilliardTrainer */,
+				PRODUCTS_GROUP /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		SCENE_GROUP /* Scene */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_SCENE001 /* BilliardScene.swift */,
+				SRC_SCENE002 /* BilliardSceneView.swift */,
+			);
+			path = Scene;
+			sourceTree = "<group>";
+		};
+		SERVICES_GROUP /* Services */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		SETTINGS_GROUP /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				SETTINGS_VIEWS_GROUP /* Views */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		SETTINGS_VIEWS_GROUP /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_SET001 /* SettingsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		STATISTICS_GROUP /* Statistics */ = {
+			isa = PBXGroup;
+			children = (
+				STATISTICS_VIEWS_GROUP /* Views */,
+			);
+			path = Statistics;
+			sourceTree = "<group>";
+		};
+		STATISTICS_VIEWS_GROUP /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_STAT001 /* StatisticsView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		TRAINING_GROUP /* Training */ = {
+			isa = PBXGroup;
+			children = (
+				TRAINING_VIEWS_GROUP /* Views */,
+				TRAINING_MODELS_GROUP /* Models */,
+				TRAINING_VIEWMODELS_GROUP /* ViewModels */,
+			);
+			path = Training;
+			sourceTree = "<group>";
+		};
+		TRAINING_MODELS_GROUP /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_TRAIN004 /* TrainingConfig.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		TRAINING_VIEWMODELS_GROUP /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_TRAIN005 /* TrainingViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		TRAINING_VIEWS_GROUP /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_TRAIN001 /* TrainingListView.swift */,
+				SRC_TRAIN002 /* TrainingDetailView.swift */,
+				SRC_TRAIN003 /* TrainingSceneView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		UTILITIES_GROUP /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				EXTENSIONS_GROUP /* Extensions */,
+				CONSTANTS_GROUP /* Constants */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		TARGET /* BilliardTrainer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CONFIGLIST /* Build configuration list for PBXNativeTarget "BilliardTrainer" */;
+			buildPhases = (
+				SOURCES /* Sources */,
+				FRAMEWORKS /* Frameworks */,
+				RESOURCES /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BilliardTrainer;
+			productName = BilliardTrainer;
+			productReference = PRODUCT /* BilliardTrainer.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		PROJECT /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					TARGET = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = PROJECT_CONFIGLIST /* Build configuration list for PBXProject "BilliardTrainer" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = "zh-Hans";
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				"zh-Hans",
+			);
+			mainGroup = ROOT;
+			productRefGroup = PRODUCTS_GROUP /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				TARGET /* BilliardTrainer */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		RESOURCES /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				RES001 /* Assets.xcassets in Resources */,
+				RES002 /* LaunchScreen.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		SOURCES /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				APP001 /* BilliardTrainerApp.swift in Sources */,
+				APP002 /* ContentView.swift in Sources */,
+				HOME001 /* HomeView.swift in Sources */,
+				HOME002 /* OnboardingView.swift in Sources */,
+				COURSE001 /* CourseListView.swift in Sources */,
+				TRAIN001 /* TrainingListView.swift in Sources */,
+				TRAIN002 /* TrainingDetailView.swift in Sources */,
+				TRAIN003 /* TrainingSceneView.swift in Sources */,
+				TRAIN004 /* TrainingConfig.swift in Sources */,
+				TRAIN005 /* TrainingViewModel.swift in Sources */,
+				STAT001 /* StatisticsView.swift in Sources */,
+				SET001 /* SettingsView.swift in Sources */,
+				SCENE001 /* BilliardScene.swift in Sources */,
+				SCENE002 /* BilliardSceneView.swift in Sources */,
+				PHYS001 /* PhysicsEngine.swift in Sources */,
+				AIM001 /* AimingSystem.swift in Sources */,
+				AIM002 /* DiamondSystem.swift in Sources */,
+				AUDIO001 /* AudioManager.swift in Sources */,
+				MODEL001 /* UserProfile.swift in Sources */,
+				UTIL001 /* PhysicsConstants.swift in Sources */,
+				UTIL002 /* Extensions.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		DEBUG /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		RELEASE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		TARGET_DEBUG /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KWH2GRNSKG;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BilliardTrainer/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "球道";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.billiardtrainer.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		TARGET_RELEASE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KWH2GRNSKG;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BilliardTrainer/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "球道";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.billiardtrainer.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		CONFIGLIST /* Build configuration list for PBXNativeTarget "BilliardTrainer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				TARGET_DEBUG /* Debug */,
+				TARGET_RELEASE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		PROJECT_CONFIGLIST /* Build configuration list for PBXProject "BilliardTrainer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DEBUG /* Debug */,
+				RELEASE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = PROJECT /* Project object */;
+}
