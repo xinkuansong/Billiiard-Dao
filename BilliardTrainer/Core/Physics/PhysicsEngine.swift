@@ -24,6 +24,15 @@ class PhysicsEngine {
     /// 物理更新频率 (Hz)
     private let updateFrequency: TimeInterval = 1.0 / 60.0
     
+    /// 球运动状态缓存
+    private var ballStates: [ObjectIdentifier: BallMotionState] = [:]
+    
+    /// 轨迹记录器
+    private var trajectoryRecorder: TrajectoryRecorder?
+    
+    /// 当前模拟时间
+    private var simulationTime: Float = 0
+    
     // MARK: - Initialization
     
     init(scene: BilliardScene) {
@@ -34,6 +43,8 @@ class PhysicsEngine {
     
     /// 开始物理模拟
     func startSimulation() {
+        simulationTime = 0
+        trajectoryRecorder = TrajectoryRecorder()
         updateTimer = Timer.scheduledTimer(
             withTimeInterval: updateFrequency,
             repeats: true
@@ -48,117 +59,147 @@ class PhysicsEngine {
         updateTimer = nil
     }
     
+    /// 获取最近一次轨迹记录
+    func latestTrajectoryRecorder() -> TrajectoryRecorder? {
+        return trajectoryRecorder
+    }
+    
     // MARK: - Update Loop
     
     /// 物理更新循环
     private func update() {
         guard let scene = scene else { return }
+        let dt = Float(updateFrequency)
+        simulationTime += dt
         
         // 更新母球旋转效果
         if let cueBall = scene.cueBallNode {
-            updateSpinEffects(for: cueBall)
+            updateBallPhysics(for: cueBall, dt: dt)
         }
         
         // 更新所有目标球
         for ball in scene.targetBallNodes {
-            updateSpinEffects(for: ball)
+            updateBallPhysics(for: ball, dt: dt)
         }
         
         // 检查是否所有球都停止
         checkBallsAtRest()
     }
     
-    /// 更新旋转效果
-    private func updateSpinEffects(for ballNode: SCNNode) {
+    /// 更新球物理（滑动/滚动/旋转）
+    private func updateBallPhysics(for ballNode: SCNNode, dt: Float) {
         guard let physicsBody = ballNode.physicsBody else { return }
         
         let velocity = physicsBody.velocity
         let angularVelocity = physicsBody.angularVelocity
         
-        // 速度阈值检查
-        let speed = sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z)
-        if speed < 0.01 {
-            return
-        }
+        let speed = SCNVector3(velocity.x, velocity.y, velocity.z).length()
+        let angularSpeed = SCNVector3(angularVelocity.x, angularVelocity.y, angularVelocity.z).length()
         
-        // 计算滑动/滚动状态
-        let isSliding = isballSliding(
-            linearVelocity: velocity,
-            angularVelocity: angularVelocity
-        )
+        let identifier = ObjectIdentifier(ballNode)
+        let currentState = ballStates[identifier] ?? .sliding
         
-        if isSliding {
-            // 滑动状态：应用滑动摩擦，旋转衰减
-            applySliFriction(to: physicsBody)
+        var newState = currentState
+        if speed < 0.005 && angularSpeed < 0.1 {
+            newState = .stationary
+        } else if speed < 0.005 && angularSpeed >= 0.1 {
+            newState = .spinning
         } else {
-            // 纯滚动状态：应用滚动摩擦
-            applyRollingFriction(to: physicsBody)
+            let sliding = isBallSliding(linearVelocity: velocity, angularVelocity: angularVelocity)
+            newState = sliding ? .sliding : .rolling
+        }
+        ballStates[identifier] = newState
+        
+        switch newState {
+        case .sliding:
+            applySlidingFriction(to: physicsBody, dt: dt)
+            applySpinDecay(to: physicsBody, dt: dt)
+        case .rolling:
+            applyRollingFriction(to: physicsBody, dt: dt)
+            applySpinDecay(to: physicsBody, dt: dt)
+        case .spinning:
+            applySpinDecay(to: physicsBody, dt: dt)
+        case .stationary, .pocketed:
+            break
         }
         
-        // 旋转衰减
-        decaySpin(physicsBody: physicsBody)
+        if let recorder = trajectoryRecorder, let name = ballNode.name {
+            let frame = BallFrame(
+                time: simulationTime,
+                position: ballNode.presentation.position,
+                velocity: physicsBody.velocity,
+                angularVelocity: physicsBody.angularVelocity,
+                state: newState
+            )
+            recorder.recordFrame(ballName: name, frame: frame)
+        }
     }
     
     /// 检测球是否处于滑动状态
-    private func isballSliding(linearVelocity: SCNVector3, angularVelocity: SCNVector4) -> Bool {
-        // 纯滚动条件：v = ω × r
-        let expectedAngularSpeed = sqrt(linearVelocity.x * linearVelocity.x + linearVelocity.z * linearVelocity.z) / BallPhysics.radius
-        
-        let actualAngularSpeed = sqrt(
-            angularVelocity.x * angularVelocity.x +
-            angularVelocity.y * angularVelocity.y +
-            angularVelocity.z * angularVelocity.z
-        )
-        
-        // 如果角速度与期望值相差较大，则为滑动
-        return abs(actualAngularSpeed - expectedAngularSpeed) > 5.0
+    private func isBallSliding(linearVelocity: SCNVector3, angularVelocity: SCNVector4) -> Bool {
+        let v = SCNVector3(linearVelocity.x, linearVelocity.y, linearVelocity.z)
+        let w = SCNVector3(angularVelocity.x, angularVelocity.y, angularVelocity.z)
+        let contactVelocity = surfaceVelocity(linear: v, angular: w, radius: BallPhysics.radius)
+        return contactVelocity.length() > 0.03
     }
     
-    /// 应用滑动摩擦
-    private func applySliFriction(to physicsBody: SCNPhysicsBody) {
+    /// 应用滑动摩擦（解析式）
+    private func applySlidingFriction(to physicsBody: SCNPhysicsBody, dt: Float) {
         let friction = SpinPhysics.slidingFriction
-        let velocity = physicsBody.velocity
+        let v = SCNVector3(physicsBody.velocity.x, physicsBody.velocity.y, physicsBody.velocity.z)
+        let w = SCNVector3(physicsBody.angularVelocity.x, physicsBody.angularVelocity.y, physicsBody.angularVelocity.z)
+        let rel = surfaceVelocity(linear: v, angular: w, radius: BallPhysics.radius)
+        let relSpeed = rel.length()
+        guard relSpeed > 0.0001 else { return }
         
-        // 计算摩擦力方向（与速度相反）
-        let speed = sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
-        if speed > 0.01 {
-            let frictionForce = SCNVector3(
-                -velocity.x / speed * friction * Float(updateFrequency),
-                0,
-                -velocity.z / speed * friction * Float(updateFrequency)
-            )
-            physicsBody.applyForce(frictionForce, asImpulse: true)
-        }
+        let uHat = rel.normalized()
+        let decel = friction * 9.81
+        let newV = v - uHat * (decel * dt)
+        
+        let up = SCNVector3(0, 1, 0)
+        let deltaW = uHat.cross(up) * (-5.0 * decel * dt / (2.0 * BallPhysics.radius))
+        let newW = w + deltaW
+        
+        physicsBody.velocity = newV
+        physicsBody.angularVelocity = SCNVector4(newW.x, newW.y, newW.z, physicsBody.angularVelocity.w)
     }
     
-    /// 应用滚动摩擦
-    private func applyRollingFriction(to physicsBody: SCNPhysicsBody) {
+    /// 应用滚动摩擦（解析式）
+    private func applyRollingFriction(to physicsBody: SCNPhysicsBody, dt: Float) {
         let friction = SpinPhysics.rollingFriction
-        let velocity = physicsBody.velocity
+        let v = SCNVector3(physicsBody.velocity.x, physicsBody.velocity.y, physicsBody.velocity.z)
+        let speed = v.length()
+        guard speed > 0.0001 else { return }
         
-        // 滚动摩擦较小
-        let speed = sqrt(velocity.x * velocity.x + velocity.z * velocity.z)
-        if speed > 0.005 {
-            let frictionForce = SCNVector3(
-                -velocity.x / speed * friction * Float(updateFrequency),
-                0,
-                -velocity.z / speed * friction * Float(updateFrequency)
-            )
-            physicsBody.applyForce(frictionForce, asImpulse: true)
-        }
+        let vHat = v.normalized()
+        let decel = friction * 9.81
+        let newV = v - vHat * (decel * dt)
+        physicsBody.velocity = newV
+        
+        let up = SCNVector3(0, 1, 0)
+        let wRolling = up.cross(newV) * (1.0 / BallPhysics.radius)
+        physicsBody.angularVelocity = SCNVector4(wRolling.x, wRolling.y, wRolling.z, physicsBody.angularVelocity.w)
     }
     
-    /// 旋转衰减
-    private func decaySpin(physicsBody: SCNPhysicsBody) {
-        let decay = SpinPhysics.spinDecayRate
+    /// 旋转衰减（解析式）
+    /// 只衰减垂直旋转分量（y分量）
+    private func applySpinDecay(to physicsBody: SCNPhysicsBody, dt: Float) {
         let angular = physicsBody.angularVelocity
+        let alpha = 5 * SpinPhysics.spinFriction * 9.81 / (2 * BallPhysics.radius)
         
-        physicsBody.angularVelocity = SCNVector4(
-            angular.x * decay,
-            angular.y * decay,
-            angular.z * decay,
-            angular.w
-        )
+        // 只衰减 y 分量（垂直旋转）
+        func decayYComponent(_ w: Float) -> Float {
+            if abs(w) < 0.0001 { return 0 }
+            let delta = min(abs(w), alpha * dt)
+            return w - (w > 0 ? delta : -delta)
+        }
+        
+        // X 和 Z 分量保持不变，只衰减 Y 分量
+        let newX = angular.x
+        let newY = decayYComponent(angular.y)
+        let newZ = angular.z
+        
+        physicsBody.angularVelocity = SCNVector4(newX, newY, newZ, angular.w)
     }
     
     /// 检查所有球是否静止
@@ -207,55 +248,13 @@ class PhysicsEngine {
     
     /// 处理球与球碰撞
     func handleBallCollision(ballA: SCNNode, ballB: SCNNode, contactPoint: SCNVector3) {
-        // 获取碰撞前的旋转状态
-        guard let bodyA = ballA.physicsBody,
-              let bodyB = ballB.physicsBody else { return }
-        
-        // 旋转传递计算
-        transferSpin(from: bodyA, to: bodyB, at: contactPoint)
+        CollisionResolver.resolveBallBall(ballA: ballA, ballB: ballB)
     }
     
-    /// 旋转传递
-    private func transferSpin(from source: SCNPhysicsBody, to target: SCNPhysicsBody, at contactPoint: SCNVector3) {
-        let sourceAngular = source.angularVelocity
-        
-        // 侧旋部分传递
-        let sideSpinTransfer = sourceAngular.y * SpinPhysics.spinToVelocityRatio * 0.3
-        
-        // 应用到目标球
-        let currentAngular = target.angularVelocity
-        target.angularVelocity = SCNVector4(
-            currentAngular.x,
-            currentAngular.y + sideSpinTransfer,
-            currentAngular.z,
-            currentAngular.w
-        )
-    }
     
     /// 处理球与库边碰撞
     func handleCushionCollision(ball: SCNNode, cushion: SCNNode, contactPoint: SCNVector3, normal: SCNVector3) {
-        guard let body = ball.physicsBody else { return }
-        
-        // 获取塞的方向
-        let sideSpinDirection = body.angularVelocity.y > 0 ? 1 : -1
-        let sideSpinMagnitude = abs(body.angularVelocity.y)
-        
-        // 库边对塞的修正
-        if sideSpinMagnitude > 5.0 {
-            let correction = Float(sideSpinDirection) * sideSpinMagnitude * SpinPhysics.cushionSpinCorrectionFactor
-            
-            // 根据库边方向计算修正力
-            let correctionForce: SCNVector3
-            if abs(normal.x) > abs(normal.z) {
-                // 左右库边
-                correctionForce = SCNVector3(0, 0, correction * 0.01)
-            } else {
-                // 上下库边
-                correctionForce = SCNVector3(correction * 0.01, 0, 0)
-            }
-            
-            body.applyForce(correctionForce, asImpulse: true)
-        }
+        CollisionResolver.resolveCushionCollision(ball: ball, normal: normal)
     }
     
     // MARK: - Trajectory Prediction
@@ -269,31 +268,196 @@ class PhysicsEngine {
         steps: Int = 100
     ) -> [SCNVector3] {
         var trajectory: [SCNVector3] = []
-        var position = startPosition
-        var currentDirection = direction.normalized()
-        var currentVelocity = velocity
         
-        for _ in 0..<steps {
-            // 简化的轨迹预测
-            let step = currentDirection * currentVelocity * AimingSystem.trajectoryTimeStep
-            position = position + step
-            
-            // 速度衰减
-            currentVelocity *= 0.995
-            
-            // 边界检测
-            if isOutOfBounds(position) {
-                // 计算反弹
-                let (newPos, newDir) = calculateBounce(position: position, direction: currentDirection)
-                position = newPos
-                currentDirection = newDir
-                currentVelocity *= TablePhysics.cushionRestitution
+        // Initialize state variables
+        var position = startPosition
+        var velocityVector = direction.normalized() * velocity
+        var angularVelocity = SCNVector3(spin.x, spin.y, spin.z)
+        var currentState: BallMotionState = .sliding
+        
+        // Constants
+        let sampleInterval = AimingSystem.trajectoryTimeStep
+        let maxTime = Float(steps) * sampleInterval
+        let halfLength = TablePhysics.innerLength / 2
+        let halfWidth = TablePhysics.innerWidth / 2
+        let radius = BallPhysics.radius
+        let cushionRestitution = TablePhysics.cushionRestitution
+        
+        var currentTime: Float = 0
+        
+        // Main loop
+        while currentTime < maxTime {
+            // Compute transition time for current state
+            var transitionTime: Float = Float.infinity
+            switch currentState {
+            case .sliding:
+                transitionTime = AnalyticalMotion.slideToRollTime(
+                    velocity: velocityVector,
+                    angularVelocity: angularVelocity,
+                    radius: radius
+                )
+            case .rolling:
+                transitionTime = AnalyticalMotion.rollToSpinTime(velocity: velocityVector)
+            case .spinning:
+                transitionTime = AnalyticalMotion.spinToStationaryTime(
+                    angularVelocity: angularVelocity,
+                    radius: radius
+                )
+            case .stationary, .pocketed:
+                break
             }
             
+            // Compute acceleration vector for CCD based on current state
+            var acceleration = SCNVector3(0, 0, 0)
+            switch currentState {
+            case .sliding:
+                let relVel = AnalyticalMotion.surfaceVelocity(
+                    linear: velocityVector,
+                    angular: angularVelocity,
+                    radius: radius
+                )
+                let relSpeed = relVel.length()
+                if relSpeed > 0.0001 {
+                    let uHat = relVel.normalized()
+                    let decel = SpinPhysics.slidingFriction * TablePhysics.gravity
+                    acceleration = -uHat * decel
+                }
+            case .rolling:
+                let speed = velocityVector.length()
+                if speed > 0.0001 {
+                    let vHat = velocityVector.normalized()
+                    let decel = SpinPhysics.rollingFriction * TablePhysics.gravity
+                    acceleration = -vHat * decel
+                }
+            case .spinning, .stationary, .pocketed:
+                acceleration = SCNVector3(0, 0, 0)
+            }
+            
+            // Find earliest cushion collision time using CCD
+            var cushionTime: Float = Float.infinity
+            var cushionNormal: SCNVector3?
+            
+            // Check four boundaries: ±halfLength (x), ±halfWidth (z)
+            // Line equation: n·p = offset, where normals point outward and offsets are positive
+            let boundaries: [(normal: SCNVector3, offset: Double)] = [
+                (SCNVector3(1, 0, 0), Double(halfLength)),   // +x boundary (x = +halfLength)
+                (SCNVector3(-1, 0, 0), Double(halfLength)),   // -x boundary (x = -halfLength)
+                (SCNVector3(0, 0, 1), Double(halfWidth)),     // +z boundary (z = +halfWidth)
+                (SCNVector3(0, 0, -1), Double(halfWidth))     // -z boundary (z = -halfWidth)
+            ]
+            
+            for (normal, offset) in boundaries {
+                if let collisionTime = CollisionDetector.ballLinearCushionTime(
+                    p: position,
+                    v: velocityVector,
+                    a: acceleration,
+                    lineNormal: normal,
+                    lineOffset: offset,
+                    R: Double(radius),
+                    maxTime: Double(maxTime - currentTime)
+                ) {
+                    if collisionTime < cushionTime {
+                        cushionTime = collisionTime
+                        cushionNormal = normal
+                    }
+                }
+            }
+            
+            // Determine dt = min(sampleInterval, transitionTime, cushionTime)
+            var dt = sampleInterval
+            var eventType: String = "sample"
+            
+            if transitionTime < dt {
+                dt = transitionTime
+                eventType = "transition"
+            }
+            
+            if cushionTime < dt {
+                dt = cushionTime
+                eventType = "cushion"
+            }
+            
+            // Ensure dt is positive and finite
+            guard dt > 0 && dt.isFinite else {
+                break
+            }
+            
+            // Evolve state for dt using AnalyticalMotion
+            switch currentState {
+            case .sliding:
+                let result = AnalyticalMotion.evolveSliding(
+                    position: position,
+                    velocity: velocityVector,
+                    angularVelocity: angularVelocity,
+                    dt: dt
+                )
+                position = result.position
+                velocityVector = result.velocity
+                angularVelocity = result.angularVelocity
+                
+            case .rolling:
+                let result = AnalyticalMotion.evolveRolling(
+                    position: position,
+                    velocity: velocityVector,
+                    angularVelocity: angularVelocity,
+                    dt: dt
+                )
+                position = result.position
+                velocityVector = result.velocity
+                angularVelocity = result.angularVelocity
+                
+            case .spinning:
+                let result = AnalyticalMotion.evolveSpinning(
+                    position: position,
+                    angularVelocity: angularVelocity,
+                    dt: dt
+                )
+                position = result.position
+                angularVelocity = result.angularVelocity
+                
+            case .stationary, .pocketed:
+                break
+            }
+            
+            // Handle state transition if dt equals transitionTime
+            if eventType == "transition" {
+                switch currentState {
+                case .sliding:
+                    currentState = .rolling
+                case .rolling:
+                    currentState = .spinning
+                case .spinning:
+                    currentState = .stationary
+                default:
+                    break
+                }
+            }
+            
+            // Handle cushion collision if dt equals cushionTime
+            if eventType == "cushion", let normal = cushionNormal {
+                // Reflect velocity on the normal
+                let velocityDotNormal = velocityVector.x * normal.x + 
+                                       velocityVector.y * normal.y + 
+                                       velocityVector.z * normal.z
+                velocityVector = velocityVector - normal * (2 * velocityDotNormal)
+                velocityVector = velocityVector * cushionRestitution
+            }
+            
+            // Add position to trajectory
             trajectory.append(position)
             
-            // 速度过小时停止
-            if currentVelocity < 0.1 {
+            // Update time
+            currentTime += dt
+            
+            // Check stop conditions
+            let speed = velocityVector.length()
+            let angularSpeed = angularVelocity.length()
+            
+            if speed < 0.1 && angularSpeed < 0.1 {
+                break
+            }
+            
+            if currentState == .stationary || currentState == .pocketed {
                 break
             }
         }
@@ -330,6 +494,11 @@ class PhysicsEngine {
         }
         
         return (newPosition, newDirection)
+    }
+    
+    private func surfaceVelocity(linear: SCNVector3, angular: SCNVector3, radius: Float) -> SCNVector3 {
+        let r = SCNVector3(0, -radius, 0)
+        return linear + angular.cross(r)
     }
 }
 

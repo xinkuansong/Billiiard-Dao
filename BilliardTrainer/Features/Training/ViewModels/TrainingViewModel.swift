@@ -52,7 +52,7 @@ class TrainingViewModel: ObservableObject {
     let config: TrainingConfig
 
     /// 场景视图模型
-    let sceneViewModel: BilliardSceneViewModel
+    private(set) var sceneViewModel: BilliardSceneViewModel
 
     /// 训练开始时间
     private var startTime: Date?
@@ -62,6 +62,9 @@ class TrainingViewModel: ObservableObject {
 
     /// 取消订阅集合
     private var cancellables = Set<AnyCancellable>()
+    
+    /// 本次击球是否有进球（用于连击判定）
+    private var didPocketThisShot: Bool = false
 
     // MARK: - Computed Properties
 
@@ -116,6 +119,34 @@ class TrainingViewModel: ObservableObject {
                 self?.handleGameStateChange(state)
             }
             .store(in: &cancellables)
+        
+        // 目标球进袋回调
+        sceneViewModel.onTargetBallPocketed = { [weak self] ballName, pocketId in
+            self?.handleBallPocketed()
+        }
+        
+        // 母球进袋回调
+        sceneViewModel.onCueBallPocketed = { [weak self] in
+            // 母球落袋：重置连击，准备下一击时需要重新放置母球
+            self?.comboCount = 0
+        }
+        
+        // 击球完成回调
+        sceneViewModel.onShotCompleted = { [weak self] isLegal, fouls in
+            guard let self = self else { return }
+            self.shotCount += 1
+            
+            // 如果本击没有进球，重置连击
+            if !self.didPocketThisShot {
+                self.comboCount = 0
+            }
+            self.didPocketThisShot = false
+            
+            // 准备下一击
+            if !self.isTrainingComplete {
+                self.resetForNextShot()
+            }
+        }
     }
 
     // MARK: - Training Control
@@ -228,11 +259,12 @@ class TrainingViewModel: ObservableObject {
 
     // MARK: - Event Handlers
 
-    /// 处理球进袋
-    func handleBallPocketed() {
+    /// 处理球进袋（由 sceneViewModel 回调触发）
+    private func handleBallPocketed() {
         pocketedCount += 1
         remainingBalls -= 1
         comboCount += 1
+        didPocketThisShot = true
 
         if comboCount > maxCombo {
             maxCombo = comboCount
@@ -249,30 +281,12 @@ class TrainingViewModel: ObservableObject {
         // 检查是否完成目标
         if pocketedCount >= config.goalCount {
             endTraining()
-        } else {
-            // 重置场景准备下一球
-            resetForNextShot()
         }
-    }
-
-    /// 处理击球（未进袋）
-    func handleShotMissed() {
-        shotCount += 1
-        comboCount = 0
-
-        // 重置场景
-        resetForNextShot()
-    }
-
-    /// 处理击球
-    func handleShotTaken() {
-        shotCount += 1
     }
 
     private func handleGameStateChange(_ state: BilliardSceneViewModel.GameState) {
         switch state {
         case .turnEnd:
-            // 回合结束，检查是否需要重置
             break
         default:
             break
@@ -280,10 +294,10 @@ class TrainingViewModel: ObservableObject {
     }
 
     private func resetForNextShot() {
-        // 延迟重置场景
+        // 延迟后从当前球局继续
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self = self, !self.isTrainingComplete else { return }
-            self.setupScene()
+            self.sceneViewModel.prepareNextShot()
         }
     }
 

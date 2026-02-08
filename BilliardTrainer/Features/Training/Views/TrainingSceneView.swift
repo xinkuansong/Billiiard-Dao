@@ -30,14 +30,63 @@ struct TrainingSceneView: View {
             // HUD覆盖层
             VStack {
                 // 顶部HUD
-                TopHUD(viewModel: viewModel, onPause: pauseTraining)
+                TopHUD(
+                    viewModel: viewModel,
+                    onPause: pauseTraining,
+                    onToggleView: { viewModel.sceneViewModel.toggleViewMode() }
+                )
 
                 Spacer()
+
+                // 中间区域：打点选择器 + 力度条
+                HStack {
+                    // 左下角：打点选择器
+                    if showGameControls {
+                        CuePointSelectorView(
+                            cuePoint: Binding(
+                                get: { viewModel.sceneViewModel.selectedCuePoint },
+                                set: { viewModel.sceneViewModel.selectedCuePoint = $0 }
+                            )
+                        )
+                        .padding(.leading, 16)
+                    }
+                    
+                    Spacer()
+                    
+                    // 右侧：力度条
+                    if showGameControls {
+                        PowerGaugeView(
+                            power: viewModel.sceneViewModel.currentPower,
+                            isCharging: viewModel.sceneViewModel.gameState == .charging
+                        )
+                        .padding(.trailing, 16)
+                    }
+                }
+                .padding(.bottom, 8)
 
                 // 底部控制提示
                 BottomHint(gameState: viewModel.sceneViewModel.gameState)
             }
             .padding()
+
+            // 2D俯视模式提示标签
+            if viewModel.sceneViewModel.isTopDownView {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Text("2D 俯视模式")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.6))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(8)
+                        Spacer()
+                    }
+                    .padding(.bottom, 60)
+                }
+            }
 
             // 暂停菜单
             if showPauseMenu {
@@ -59,7 +108,16 @@ struct TrainingSceneView: View {
             }
         }
         .onAppear {
+            print("[TrainingSceneView] 📱 onAppear 触发")
+            // 强制横屏
+            OrientationHelper.forceLandscape()
+            print("[TrainingSceneView] 📱 开始训练...")
             viewModel.startTraining()
+            print("[TrainingSceneView] ✅ 训练已启动")
+        }
+        .onDisappear {
+            // 恢复竖屏
+            OrientationHelper.restorePortrait()
         }
         .alert("确定退出训练?", isPresented: $showExitConfirm) {
             Button("继续训练", role: .cancel) {
@@ -71,6 +129,12 @@ struct TrainingSceneView: View {
         } message: {
             Text("退出后当前训练进度将不会保存")
         }
+    }
+    
+    /// 是否显示游戏控件（打点选择器、力度条）
+    private var showGameControls: Bool {
+        let state = viewModel.sceneViewModel.gameState
+        return state == .aiming || state == .charging
     }
 
     // MARK: - Actions
@@ -99,6 +163,7 @@ struct TrainingSceneView: View {
 private struct TopHUD: View {
     @ObservedObject var viewModel: TrainingViewModel
     let onPause: () -> Void
+    let onToggleView: () -> Void
 
     var body: some View {
         HStack {
@@ -157,14 +222,22 @@ private struct TopHUD: View {
             .cornerRadius(12)
 
             Spacer()
+            
+            HStack(spacing: 8) {
+                // 2D/3D 视角切换按钮
+                Button(action: onToggleView) {
+                    Image(systemName: viewModel.sceneViewModel.isTopDownView ? "cube.fill" : "square.split.1x2.fill")
+                        .font(.title3)
+                        .foregroundColor(.white)
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                }
 
-            // 连击显示
-            if viewModel.comboCount > 1 {
-                ComboIndicator(combo: viewModel.comboCount)
-            } else {
-                // 占位
-                Color.clear
-                    .frame(width: 44, height: 44)
+                // 连击显示
+                if viewModel.comboCount > 1 {
+                    ComboIndicator(combo: viewModel.comboCount)
+                }
             }
         }
     }
@@ -219,6 +292,8 @@ private struct BottomHint: View {
         switch gameState {
         case .idle:
             return "点击母球开始瞄准"
+        case .placing:
+            return "拖动放置母球 | 点击确认位置"
         case .aiming:
             return "拖动调整方向 | 长按蓄力击球"
         case .charging:

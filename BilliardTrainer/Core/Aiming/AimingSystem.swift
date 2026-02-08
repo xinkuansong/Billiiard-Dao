@@ -63,7 +63,22 @@ class AimingCalculator {
         let aimPoint = targetBall - ballToPocket * (BallPhysics.radius * 2)
         
         // 3. 计算母球到瞄准点的方向
-        let aimDirection = (aimPoint - cueBall).normalized()
+        var aimDirection = (aimPoint - cueBall).normalized()
+        
+        // 3.5. 应用 squirt 角修正（侧旋导致的方向偏移）
+        if abs(spinX) > 0.001 {
+            let squirt = CueBallStrike.squirtAngle(a: spinX)
+            if abs(squirt) > 0.0001 {
+                // 绕 Y 轴旋转 aimDirection
+                let cosA = cosf(squirt)
+                let sinA = sinf(squirt)
+                aimDirection = SCNVector3(
+                    aimDirection.x * cosA - aimDirection.z * sinA,
+                    aimDirection.y,
+                    aimDirection.x * sinA + aimDirection.z * cosA
+                )
+            }
+        }
         
         // 4. 计算厚度（切入角度）
         let cueToBall = (targetBall - cueBall).normalized()
@@ -111,6 +126,77 @@ class AimingCalculator {
         )
     }
     
+    // MARK: - Ghost Ball & Pocket Analysis
+    
+    /// 幽灵球位置（目标球到袋口方向的反向 2R）
+    static func ghostBallCenter(objectBall: SCNVector3, pocket: SCNVector3) -> SCNVector3 {
+        let ballToPocket = (pocket - objectBall).normalized()
+        return objectBall - ballToPocket * (BallPhysics.radius * 2)
+    }
+    
+    /// 判断路径是否被其他球遮挡
+    static func isPathOccluded(
+        from: SCNVector3,
+        to: SCNVector3,
+        obstacles: [SCNVector3],
+        ballRadius: Float
+    ) -> Bool {
+        let path = to - from
+        let length = path.length()
+        guard length > 0.0001 else { return false }
+        let dir = path.normalized()
+        
+        for point in obstacles {
+            let projection = (point - from).dot(dir)
+            if projection < 0 || projection > length { continue }
+            let closest = from + dir * projection
+            let distance = (point - closest).length()
+            if distance < ballRadius * 2 {
+                return true
+            }
+        }
+        return false
+    }
+    
+    /// 可行袋口分析
+    static func viablePockets(
+        cueBall: SCNVector3,
+        objectBall: SCNVector3,
+        pockets: [Pocket],
+        otherBalls: [SCNVector3]
+    ) -> [(Pocket, Float)] {
+        var results: [(Pocket, Float)] = []
+        for pocket in pockets {
+            let ballToPocket = (pocket.center - objectBall).normalized()
+            let cueToBall = (objectBall - cueBall).normalized()
+            let thickness = calculateThickness(cueToBall: cueToBall, ballToPocket: ballToPocket)
+        let cutAngle = acosf(thickness).degrees
+            if cutAngle > 80 { continue }
+            
+            let occluded1 = isPathOccluded(
+                from: cueBall,
+                to: objectBall,
+                obstacles: otherBalls,
+                ballRadius: BallPhysics.radius
+            )
+            let occluded2 = isPathOccluded(
+                from: objectBall,
+                to: pocket.center,
+                obstacles: otherBalls,
+                ballRadius: BallPhysics.radius
+            )
+            if occluded1 || occluded2 { continue }
+            
+            results.append((pocket, Float(cutAngle)))
+        }
+        return results
+    }
+    
+    /// 选择最容易进袋的袋口
+    static func pickEasiestPot(_ candidates: [(Pocket, Float)]) -> Pocket? {
+        return candidates.sorted(by: { $0.1 < $1.1 }).first?.0
+    }
+    
     // MARK: - Thickness Calculation
     
     /// 计算厚度
@@ -140,7 +226,7 @@ class AimingCalculator {
         // 基础分离角 = 90° - 切入角
         // 纯滚动时分离角约90°
         // 切入角 = arccos(thickness)
-        let cutAngle = acos(thickness)  // 弧度
+        let cutAngle = acosf(thickness)  // 弧度
         var separationAngle = SeparationAngle.pureRolling - (cutAngle * 180 / .pi)
         
         // 杆法修正
@@ -244,7 +330,7 @@ class AimingCalculator {
         
         // 3. 角度因素
         // 计算母球-目标球-袋口形成的角度
-        let cutAngle = acos(thickness) * 180 / .pi
+        let cutAngle = acosf(thickness) * 180 / .pi
         if cutAngle > 60 { score += 2 }
         else if cutAngle > 45 { score += 1 }
         
@@ -293,8 +379,8 @@ class AimingCalculator {
     
     /// 绕Y轴旋转向量
     private static func rotateVectorY(_ vector: SCNVector3, angle: Float) -> SCNVector3 {
-        let cosAngle = cos(angle)
-        let sinAngle = sin(angle)
+        let cosAngle = cosf(angle)
+        let sinAngle = sinf(angle)
         
         return SCNVector3(
             vector.x * cosAngle - vector.z * sinAngle,
@@ -304,33 +390,3 @@ class AimingCalculator {
     }
 }
 
-// MARK: - Ghost Ball Method
-/// 虚拟球瞄准法
-class GhostBallAiming {
-    
-    /// 计算虚拟球位置
-    static func calculateGhostBallPosition(
-        targetBall: SCNVector3,
-        pocket: SCNVector3
-    ) -> SCNVector3 {
-        let direction = (pocket - targetBall).normalized()
-        return targetBall - direction * (BallPhysics.radius * 2)
-    }
-    
-    /// 检查虚拟球是否与其他球重叠
-    static func isGhostBallBlocked(
-        ghostBallPosition: SCNVector3,
-        otherBalls: [SCNVector3]
-    ) -> Bool {
-        let minDistance = BallPhysics.radius * 2
-        
-        for ball in otherBalls {
-            let distance = (ball - ghostBallPosition).length()
-            if distance < minDistance {
-                return true
-            }
-        }
-        
-        return false
-    }
-}

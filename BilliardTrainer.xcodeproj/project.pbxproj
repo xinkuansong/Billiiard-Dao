@@ -17,10 +17,21 @@
 		HOME002 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_HOME002 /* OnboardingView.swift */; };
 		MODEL001 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_MODEL001 /* UserProfile.swift */; };
 		PHYS001 /* PhysicsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS001 /* PhysicsEngine.swift */; };
+		PHYS002 /* BallMotionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS002 /* BallMotionState.swift */; };
+		PHYS003 /* CollisionResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS003 /* CollisionResolver.swift */; };
+		PHYS004 /* TrajectoryRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS004 /* TrajectoryRecorder.swift */; };
+		PHYS005 /* CueBallStrike.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS005 /* CueBallStrike.swift */; };
+		PHYS006 /* AnalyticalMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS006 /* AnalyticalMotion.swift */; };
+		PHYS007 /* CollisionDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS007 /* CollisionDetector.swift */; };
+		PHYS008 /* QuarticSolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS008 /* QuarticSolver.swift */; };
+		PHYS009 /* CushionCollisionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS009 /* CushionCollisionModel.swift */; };
+		PHYS010 /* EventDrivenEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS010 /* EventDrivenEngine.swift */; };
+
 		RES001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ASSETS /* Assets.xcassets */; };
 		RES002 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = LAUNCH /* LaunchScreen.storyboard */; };
 		SCENE001 /* BilliardScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE001 /* BilliardScene.swift */; };
 		SCENE002 /* BilliardSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE002 /* BilliardSceneView.swift */; };
+		SCENE005 /* TableGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE005 /* TableGeometry.swift */; };
 		SET001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SET001 /* SettingsView.swift */; };
 		STAT001 /* StatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_STAT001 /* StatisticsView.swift */; };
 		TRAIN001 /* TrainingListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN001 /* TrainingListView.swift */; };
@@ -30,11 +41,19 @@
 		TRAIN005 /* TrainingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN005 /* TrainingViewModel.swift */; };
 		UTIL001 /* PhysicsConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL001 /* PhysicsConstants.swift */; };
 		UTIL002 /* Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL002 /* Extensions.swift */; };
+		UTIL003 /* SCNVector3+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL003 /* SCNVector3+Extensions.swift */; };
+		SCENE003 /* TableModelLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE003 /* TableModelLoader.swift */; };
+		SCENE004 /* CueStick.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE004 /* CueStick.swift */; };
+		TRAIN006 /* CuePointSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN006 /* CuePointSelectorView.swift */; };
+		TRAIN007 /* PowerGaugeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN007 /* PowerGaugeView.swift */; };
+		RES003 /* TaiQiuZhuo.usdz in Resources */ = {isa = PBXBuildFile; fileRef = RES_USDZ001 /* TaiQiuZhuo.usdz */; };
+		RULES001 /* GameRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_RULES001 /* GameRules.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		ASSETS /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		E4237E0D2F294DF200FC8AE5 /* billiard_table.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = billiard_table.usdz; sourceTree = "<group>"; };
+		RES_USDZ001 /* TaiQiuZhuo.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = TaiQiuZhuo.usdz; sourceTree = "<group>"; };
+		SRC_SCENE003 /* TableModelLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TableModelLoader.swift; sourceTree = "<group>"; };
 		INFO /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		LAUNCH /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		PRODUCT /* BilliardTrainer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BilliardTrainer.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -48,8 +67,19 @@
 		SRC_HOME002 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		SRC_MODEL001 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
 		SRC_PHYS001 /* PhysicsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhysicsEngine.swift; sourceTree = "<group>"; };
+		SRC_PHYS002 /* BallMotionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BallMotionState.swift; sourceTree = "<group>"; };
+		SRC_PHYS003 /* CollisionResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollisionResolver.swift; sourceTree = "<group>"; };
+		SRC_PHYS004 /* TrajectoryRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrajectoryRecorder.swift; sourceTree = "<group>"; };
+		SRC_PHYS005 /* CueBallStrike.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CueBallStrike.swift; sourceTree = "<group>"; };
+		SRC_PHYS006 /* AnalyticalMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticalMotion.swift; sourceTree = "<group>"; };
+		SRC_PHYS007 /* CollisionDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollisionDetector.swift; sourceTree = "<group>"; };
+		SRC_PHYS008 /* QuarticSolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuarticSolver.swift; sourceTree = "<group>"; };
+		SRC_PHYS009 /* CushionCollisionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CushionCollisionModel.swift; sourceTree = "<group>"; };
+		SRC_PHYS010 /* EventDrivenEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDrivenEngine.swift; sourceTree = "<group>"; };
+
 		SRC_SCENE001 /* BilliardScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilliardScene.swift; sourceTree = "<group>"; };
 		SRC_SCENE002 /* BilliardSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilliardSceneView.swift; sourceTree = "<group>"; };
+		SRC_SCENE005 /* TableGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TableGeometry.swift; sourceTree = "<group>"; };
 		SRC_SET001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		SRC_STAT001 /* StatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsView.swift; sourceTree = "<group>"; };
 		SRC_TRAIN001 /* TrainingListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingListView.swift; sourceTree = "<group>"; };
@@ -59,6 +89,11 @@
 		SRC_TRAIN005 /* TrainingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingViewModel.swift; sourceTree = "<group>"; };
 		SRC_UTIL001 /* PhysicsConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhysicsConstants.swift; sourceTree = "<group>"; };
 		SRC_UTIL002 /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
+		SRC_UTIL003 /* SCNVector3+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SCNVector3+Extensions.swift"; sourceTree = "<group>"; };
+		SRC_SCENE004 /* CueStick.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CueStick.swift; sourceTree = "<group>"; };
+		SRC_TRAIN006 /* CuePointSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CuePointSelectorView.swift; sourceTree = "<group>"; };
+		SRC_TRAIN007 /* PowerGaugeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerGaugeView.swift; sourceTree = "<group>"; };
+		SRC_RULES001 /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameRules.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -128,6 +163,7 @@
 				CAMERA_GROUP /* Camera */,
 				SCENE_GROUP /* Scene */,
 				AUDIO_GROUP /* Audio */,
+				RULES_GROUP /* Rules */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -152,6 +188,7 @@
 			isa = PBXGroup;
 			children = (
 				SRC_UTIL002 /* Extensions.swift */,
+				SRC_UTIL003 /* SCNVector3+Extensions.swift */,
 			);
 			path = Extensions;
 			sourceTree = "<group>";
@@ -197,7 +234,6 @@
 				RESOURCES_GROUP /* Resources */,
 				UTILITIES_GROUP /* Utilities */,
 				INFO /* Info.plist */,
-				E4237E0D2F294DF200FC8AE5 /* billiard_table.usdz */,
 			);
 			path = BilliardTrainer;
 			sourceTree = "<group>";
@@ -214,8 +250,25 @@
 			isa = PBXGroup;
 			children = (
 				SRC_PHYS001 /* PhysicsEngine.swift */,
+				SRC_PHYS002 /* BallMotionState.swift */,
+				SRC_PHYS003 /* CollisionResolver.swift */,
+				SRC_PHYS004 /* TrajectoryRecorder.swift */,
+				SRC_PHYS005 /* CueBallStrike.swift */,
+				SRC_PHYS006 /* AnalyticalMotion.swift */,
+				SRC_PHYS007 /* CollisionDetector.swift */,
+				SRC_PHYS008 /* QuarticSolver.swift */,
+				SRC_PHYS009 /* CushionCollisionModel.swift */,
+				SRC_PHYS010 /* EventDrivenEngine.swift */,
 			);
 			path = Physics;
+			sourceTree = "<group>";
+		};
+		RULES_GROUP /* Rules */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_RULES001 /* GameRules.swift */,
+			);
+			path = Rules;
 			sourceTree = "<group>";
 		};
 		PRODUCTS_GROUP /* Products */ = {
@@ -231,6 +284,7 @@
 			children = (
 				ASSETS /* Assets.xcassets */,
 				LAUNCH /* LaunchScreen.storyboard */,
+				RES_USDZ001 /* TaiQiuZhuo.usdz */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -248,6 +302,9 @@
 			children = (
 				SRC_SCENE001 /* BilliardScene.swift */,
 				SRC_SCENE002 /* BilliardSceneView.swift */,
+				SRC_SCENE003 /* TableModelLoader.swift */,
+				SRC_SCENE004 /* CueStick.swift */,
+				SRC_SCENE005 /* TableGeometry.swift */,
 			);
 			path = Scene;
 			sourceTree = "<group>";
@@ -323,6 +380,8 @@
 				SRC_TRAIN001 /* TrainingListView.swift */,
 				SRC_TRAIN002 /* TrainingDetailView.swift */,
 				SRC_TRAIN003 /* TrainingSceneView.swift */,
+				SRC_TRAIN006 /* CuePointSelectorView.swift */,
+				SRC_TRAIN007 /* PowerGaugeView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -397,6 +456,7 @@
 			files = (
 				RES001 /* Assets.xcassets in Resources */,
 				RES002 /* LaunchScreen.storyboard in Resources */,
+				RES003 /* TaiQiuZhuo.usdz in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -422,12 +482,28 @@
 				SCENE001 /* BilliardScene.swift in Sources */,
 				SCENE002 /* BilliardSceneView.swift in Sources */,
 				PHYS001 /* PhysicsEngine.swift in Sources */,
+				PHYS002 /* BallMotionState.swift in Sources */,
+				PHYS003 /* CollisionResolver.swift in Sources */,
+				PHYS004 /* TrajectoryRecorder.swift in Sources */,
+				PHYS005 /* CueBallStrike.swift in Sources */,
+				PHYS006 /* AnalyticalMotion.swift in Sources */,
+				PHYS007 /* CollisionDetector.swift in Sources */,
+				PHYS008 /* QuarticSolver.swift in Sources */,
+				PHYS009 /* CushionCollisionModel.swift in Sources */,
+				PHYS010 /* EventDrivenEngine.swift in Sources */,
 				AIM001 /* AimingSystem.swift in Sources */,
 				AIM002 /* DiamondSystem.swift in Sources */,
 				AUDIO001 /* AudioManager.swift in Sources */,
 				MODEL001 /* UserProfile.swift in Sources */,
 				UTIL001 /* PhysicsConstants.swift in Sources */,
 				UTIL002 /* Extensions.swift in Sources */,
+				UTIL003 /* SCNVector3+Extensions.swift in Sources */,
+				SCENE003 /* TableModelLoader.swift in Sources */,
+				SCENE004 /* CueStick.swift in Sources */,
+				SCENE005 /* TableGeometry.swift in Sources */,
+				TRAIN006 /* CuePointSelectorView.swift in Sources */,
+				TRAIN007 /* PowerGaugeView.swift in Sources */,
+				RULES001 /* GameRules.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

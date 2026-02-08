@@ -7,13 +7,52 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
+
+/// 屏幕方向控制辅助类
+class OrientationHelper {
+    /// 当前允许的方向
+    static var orientationMask: UIInterfaceOrientationMask = .allButUpsideDown
+    
+    /// 强制横屏
+    static func forceLandscape() {
+        orientationMask = .landscape
+        requestOrientationUpdate(.landscapeRight)
+    }
+    
+    /// 恢复竖屏
+    static func restorePortrait() {
+        orientationMask = .allButUpsideDown
+        requestOrientationUpdate(.portrait)
+    }
+    
+    private static func requestOrientationUpdate(_ orientation: UIInterfaceOrientation) {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
+        let geometryPreferences = UIWindowScene.GeometryPreferences.iOS(
+            interfaceOrientations: orientation.isLandscape ? .landscape : .portrait
+        )
+        windowScene.requestGeometryUpdate(geometryPreferences) { error in
+            print("[OrientationHelper] Geometry update error: \(error)")
+        }
+    }
+}
+
+/// AppDelegate 用于控制支持的方向
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        return OrientationHelper.orientationMask
+    }
+}
 
 @main
 struct BilliardTrainerApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var appState = AppState()
 
     /// SwiftData 模型容器
     var sharedModelContainer: ModelContainer = {
+        print("[App] 🚀 创建 ModelContainer...")
         let schema = Schema([
             UserProfile.self,
             CourseProgress.self,
@@ -26,7 +65,9 @@ struct BilliardTrainerApp: App {
         )
 
         do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
+            let container = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            print("[App] ✅ ModelContainer 创建成功")
+            return container
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
@@ -36,6 +77,9 @@ struct BilliardTrainerApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
+                .onAppear {
+                    print("[App] ✅ ContentView 已出现")
+                }
         }
         .modelContainer(sharedModelContainer)
     }
