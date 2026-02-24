@@ -1,0 +1,135 @@
+{
+  "metadata": {
+    "id": "s6-break-compact",
+    "engine": "pooltool-fallback"
+  },
+  "events": [],
+  "finalState": {
+    "cueBall": {
+      "position": [
+        0.0,
+        0.828575,
+        0.6
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        -4.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "sliding"
+    },
+    "ball_1": {
+      "position": [
+        0.0,
+        0.828575,
+        0.0
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "stationary"
+    },
+    "ball_2": {
+      "position": [
+        0.06,
+        0.828575,
+        -0.06
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "stationary"
+    },
+    "ball_3": {
+      "position": [
+        -0.06,
+        0.828575,
+        -0.06
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "stationary"
+    },
+    "ball_4": {
+      "position": [
+        0.12,
+        0.828575,
+        -0.12
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "stationary"
+    },
+    "ball_5": {
+      "position": [
+        0.0,
+        0.828575,
+        -0.12
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "stationary"
+    },
+    "ball_6": {
+      "position": [
+        -0.12,
+        0.828575,
+        -0.12
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "stationary"
+    }
+  }
+}

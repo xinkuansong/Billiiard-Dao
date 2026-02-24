@@ -3,16 +3,23 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
+		02CA8E56A04D417198EB5361 /* ObservationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D32C531CA25249E1B6D0C8C2 /* ObservationController.swift */; };
+		248CDA5A16FF4B3282B219ED /* CameraStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF9C0C1FD0454F3CB4082937 /* CameraStateMachine.swift */; };
+		394DBD6C06C7433E8468C8E1 /* AutoAlignController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFC823FC1B84DF281A627D4 /* AutoAlignController.swift */; };
+		8DDD7CE439624E9A9604D29E /* AimingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 539A0189EF764644BB89DDF3 /* AimingController.swift */; };
+		A699E560519B4F7894364EE4 /* ViewTransitionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3FD7E698B9D4CC3BA1A3A39 /* ViewTransitionController.swift */; };
 		AIM001 /* AimingSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_AIM001 /* AimingSystem.swift */; };
 		AIM002 /* DiamondSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_AIM002 /* DiamondSystem.swift */; };
 		APP001 /* BilliardTrainerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC001 /* BilliardTrainerApp.swift */; };
 		APP002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC002 /* ContentView.swift */; };
 		AUDIO001 /* AudioManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_AUDIO001 /* AudioManager.swift */; };
 		COURSE001 /* CourseListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_COURSE001 /* CourseListView.swift */; };
+		FREEPLAY001 /* FreePlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_FREEPLAY001 /* FreePlayView.swift */; };
+		FREEPLAY002 /* FreePlayViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_FREEPLAY002 /* FreePlayViewModel.swift */; };
 		HOME001 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_HOME001 /* HomeView.swift */; };
 		HOME002 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_HOME002 /* OnboardingView.swift */; };
 		MODEL001 /* UserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_MODEL001 /* UserProfile.swift */; };
@@ -26,12 +33,21 @@
 		PHYS008 /* QuarticSolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS008 /* QuarticSolver.swift */; };
 		PHYS009 /* CushionCollisionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS009 /* CushionCollisionModel.swift */; };
 		PHYS010 /* EventDrivenEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS010 /* EventDrivenEngine.swift */; };
-
+		PHYS011 /* TrajectoryPlayback.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_PHYS011 /* TrajectoryPlayback.swift */; };
 		RES001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ASSETS /* Assets.xcassets */; };
 		RES002 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = LAUNCH /* LaunchScreen.storyboard */; };
+		RES003 /* TaiQiuZhuo.usdz in Resources */ = {isa = PBXBuildFile; fileRef = RES_USDZ001 /* TaiQiuZhuo.usdz */; };
+		RULES001 /* GameRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_RULES001 /* GameRules.swift */; };
+		RULES002 /* EightBallGameManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_RULES002 /* EightBallGameManager.swift */; };
 		SCENE001 /* BilliardScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE001 /* BilliardScene.swift */; };
 		SCENE002 /* BilliardSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE002 /* BilliardSceneView.swift */; };
+		SCENE003 /* TableModelLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE003 /* TableModelLoader.swift */; };
+		SCENE004 /* CueStick.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE004 /* CueStick.swift */; };
 		SCENE005 /* TableGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE005 /* TableGeometry.swift */; };
+		SCENE006 /* CameraRig.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE006 /* CameraRig.swift */; };
+		SCENE007 /* RenderQualityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE007 /* RenderQualityManager.swift */; };
+		SCENE008 /* MaterialFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE008 /* MaterialFactory.swift */; };
+		SCENE009 /* EnvironmentLightingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE009 /* EnvironmentLightingManager.swift */; };
 		SET001 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SET001 /* SettingsView.swift */; };
 		STAT001 /* StatisticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_STAT001 /* StatisticsView.swift */; };
 		TRAIN001 /* TrainingListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN001 /* TrainingListView.swift */; };
@@ -39,30 +55,43 @@
 		TRAIN003 /* TrainingSceneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN003 /* TrainingSceneView.swift */; };
 		TRAIN004 /* TrainingConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN004 /* TrainingConfig.swift */; };
 		TRAIN005 /* TrainingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN005 /* TrainingViewModel.swift */; };
+		TRAIN006 /* CuePointSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN006 /* CuePointSelectorView.swift */; };
+		TRAIN007 /* PowerGaugeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN007 /* PowerGaugeView.swift */; };
 		UTIL001 /* PhysicsConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL001 /* PhysicsConstants.swift */; };
 		UTIL002 /* Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL002 /* Extensions.swift */; };
 		UTIL003 /* SCNVector3+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL003 /* SCNVector3+Extensions.swift */; };
-		SCENE003 /* TableModelLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE003 /* TableModelLoader.swift */; };
-		SCENE004 /* CueStick.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_SCENE004 /* CueStick.swift */; };
-		TRAIN006 /* CuePointSelectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN006 /* CuePointSelectorView.swift */; };
-		TRAIN007 /* PowerGaugeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_TRAIN007 /* PowerGaugeView.swift */; };
-		RES003 /* TaiQiuZhuo.usdz in Resources */ = {isa = PBXBuildFile; fileRef = RES_USDZ001 /* TaiQiuZhuo.usdz */; };
-		RULES001 /* GameRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_RULES001 /* GameRules.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		E4DA15602F48AEED00C0E3D5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = PROJECT /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = TARGET;
+			remoteInfo = BilliardTrainer;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		539A0189EF764644BB89DDF3 /* AimingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AimingController.swift; sourceTree = "<group>"; };
 		ASSETS /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		RES_USDZ001 /* TaiQiuZhuo.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = TaiQiuZhuo.usdz; sourceTree = "<group>"; };
-		SRC_SCENE003 /* TableModelLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TableModelLoader.swift; sourceTree = "<group>"; };
+		CF9C0C1FD0454F3CB4082937 /* CameraStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraStateMachine.swift; sourceTree = "<group>"; };
+		D32C531CA25249E1B6D0C8C2 /* ObservationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObservationController.swift; sourceTree = "<group>"; };
+		D3FD7E698B9D4CC3BA1A3A39 /* ViewTransitionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewTransitionController.swift; sourceTree = "<group>"; };
+		DFFC823FC1B84DF281A627D4 /* AutoAlignController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoAlignController.swift; sourceTree = "<group>"; };
+		E4DA155C2F48AEED00C0E3D5 /* BilliardTrainerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BilliardTrainerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		INFO /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		LAUNCH /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		PRODUCT /* BilliardTrainer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BilliardTrainer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		RES_USDZ001 /* TaiQiuZhuo.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = TaiQiuZhuo.usdz; sourceTree = "<group>"; };
 		SRC001 /* BilliardTrainerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilliardTrainerApp.swift; sourceTree = "<group>"; };
 		SRC002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		SRC_AIM001 /* AimingSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AimingSystem.swift; sourceTree = "<group>"; };
 		SRC_AIM002 /* DiamondSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiamondSystem.swift; sourceTree = "<group>"; };
 		SRC_AUDIO001 /* AudioManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioManager.swift; sourceTree = "<group>"; };
 		SRC_COURSE001 /* CourseListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CourseListView.swift; sourceTree = "<group>"; };
+		SRC_FREEPLAY001 /* FreePlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreePlayView.swift; sourceTree = "<group>"; };
+		SRC_FREEPLAY002 /* FreePlayViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreePlayViewModel.swift; sourceTree = "<group>"; };
 		SRC_HOME001 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		SRC_HOME002 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		SRC_MODEL001 /* UserProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfile.swift; sourceTree = "<group>"; };
@@ -76,10 +105,18 @@
 		SRC_PHYS008 /* QuarticSolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuarticSolver.swift; sourceTree = "<group>"; };
 		SRC_PHYS009 /* CushionCollisionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CushionCollisionModel.swift; sourceTree = "<group>"; };
 		SRC_PHYS010 /* EventDrivenEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDrivenEngine.swift; sourceTree = "<group>"; };
-
+		SRC_PHYS011 /* TrajectoryPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrajectoryPlayback.swift; sourceTree = "<group>"; };
+		SRC_RULES001 /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameRules.swift; sourceTree = "<group>"; };
+		SRC_RULES002 /* EightBallGameManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EightBallGameManager.swift; sourceTree = "<group>"; };
 		SRC_SCENE001 /* BilliardScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilliardScene.swift; sourceTree = "<group>"; };
 		SRC_SCENE002 /* BilliardSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BilliardSceneView.swift; sourceTree = "<group>"; };
+		SRC_SCENE003 /* TableModelLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TableModelLoader.swift; sourceTree = "<group>"; };
+		SRC_SCENE004 /* CueStick.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CueStick.swift; sourceTree = "<group>"; };
 		SRC_SCENE005 /* TableGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TableGeometry.swift; sourceTree = "<group>"; };
+		SRC_SCENE006 /* CameraRig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraRig.swift; sourceTree = "<group>"; };
+		SRC_SCENE007 /* RenderQualityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RenderQualityManager.swift; sourceTree = "<group>"; };
+		SRC_SCENE008 /* MaterialFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaterialFactory.swift; sourceTree = "<group>"; };
+		SRC_SCENE009 /* EnvironmentLightingManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentLightingManager.swift; sourceTree = "<group>"; };
 		SRC_SET001 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		SRC_STAT001 /* StatisticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatisticsView.swift; sourceTree = "<group>"; };
 		SRC_TRAIN001 /* TrainingListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingListView.swift; sourceTree = "<group>"; };
@@ -87,16 +124,25 @@
 		SRC_TRAIN003 /* TrainingSceneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingSceneView.swift; sourceTree = "<group>"; };
 		SRC_TRAIN004 /* TrainingConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingConfig.swift; sourceTree = "<group>"; };
 		SRC_TRAIN005 /* TrainingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingViewModel.swift; sourceTree = "<group>"; };
+		SRC_TRAIN006 /* CuePointSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CuePointSelectorView.swift; sourceTree = "<group>"; };
+		SRC_TRAIN007 /* PowerGaugeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerGaugeView.swift; sourceTree = "<group>"; };
 		SRC_UTIL001 /* PhysicsConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhysicsConstants.swift; sourceTree = "<group>"; };
 		SRC_UTIL002 /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
 		SRC_UTIL003 /* SCNVector3+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SCNVector3+Extensions.swift"; sourceTree = "<group>"; };
-		SRC_SCENE004 /* CueStick.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CueStick.swift; sourceTree = "<group>"; };
-		SRC_TRAIN006 /* CuePointSelectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CuePointSelectorView.swift; sourceTree = "<group>"; };
-		SRC_TRAIN007 /* PowerGaugeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PowerGaugeView.swift; sourceTree = "<group>"; };
-		SRC_RULES001 /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameRules.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		E4DA155D2F48AEED00C0E3D5 /* BilliardTrainerTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = BilliardTrainerTests; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
 /* Begin PBXFrameworksBuildPhase section */
+		E4DA15592F48AEED00C0E3D5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FRAMEWORKS /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -107,6 +153,18 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1D344560766C4FEFB92741E8 /* Camera */ = {
+			isa = PBXGroup;
+			children = (
+				CF9C0C1FD0454F3CB4082937 /* CameraStateMachine.swift */,
+				539A0189EF764644BB89DDF3 /* AimingController.swift */,
+				D3FD7E698B9D4CC3BA1A3A39 /* ViewTransitionController.swift */,
+				D32C531CA25249E1B6D0C8C2 /* ObservationController.swift */,
+				DFFC823FC1B84DF281A627D4 /* AutoAlignController.swift */,
+			);
+			path = Camera;
+			sourceTree = "<group>";
+		};
 		AIMING_GROUP /* Aiming */ = {
 			isa = PBXGroup;
 			children = (
@@ -199,11 +257,37 @@
 				HOME_GROUP /* Home */,
 				COURSE_GROUP /* Course */,
 				TRAINING_GROUP /* Training */,
+				FREEPLAY_GROUP /* FreePlay */,
 				CHALLENGE_GROUP /* Challenge */,
 				STATISTICS_GROUP /* Statistics */,
 				SETTINGS_GROUP /* Settings */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		FREEPLAY_GROUP /* FreePlay */ = {
+			isa = PBXGroup;
+			children = (
+				FREEPLAY_VIEWS_GROUP /* Views */,
+				FREEPLAY_VIEWMODELS_GROUP /* ViewModels */,
+			);
+			path = FreePlay;
+			sourceTree = "<group>";
+		};
+		FREEPLAY_VIEWMODELS_GROUP /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_FREEPLAY002 /* FreePlayViewModel.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		FREEPLAY_VIEWS_GROUP /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_FREEPLAY001 /* FreePlayView.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 		HOME_GROUP /* Home */ = {
@@ -259,22 +343,16 @@
 				SRC_PHYS008 /* QuarticSolver.swift */,
 				SRC_PHYS009 /* CushionCollisionModel.swift */,
 				SRC_PHYS010 /* EventDrivenEngine.swift */,
+				SRC_PHYS011 /* TrajectoryPlayback.swift */,
 			);
 			path = Physics;
-			sourceTree = "<group>";
-		};
-		RULES_GROUP /* Rules */ = {
-			isa = PBXGroup;
-			children = (
-				SRC_RULES001 /* GameRules.swift */,
-			);
-			path = Rules;
 			sourceTree = "<group>";
 		};
 		PRODUCTS_GROUP /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				PRODUCT /* BilliardTrainer.app */,
+				E4DA155C2F48AEED00C0E3D5 /* BilliardTrainerTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -293,8 +371,18 @@
 			isa = PBXGroup;
 			children = (
 				MAIN_GROUP /* BilliardTrainer */,
+				E4DA155D2F48AEED00C0E3D5 /* BilliardTrainerTests */,
 				PRODUCTS_GROUP /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		RULES_GROUP /* Rules */ = {
+			isa = PBXGroup;
+			children = (
+				SRC_RULES001 /* GameRules.swift */,
+				SRC_RULES002 /* EightBallGameManager.swift */,
+			);
+			path = Rules;
 			sourceTree = "<group>";
 		};
 		SCENE_GROUP /* Scene */ = {
@@ -305,6 +393,11 @@
 				SRC_SCENE003 /* TableModelLoader.swift */,
 				SRC_SCENE004 /* CueStick.swift */,
 				SRC_SCENE005 /* TableGeometry.swift */,
+				SRC_SCENE006 /* CameraRig.swift */,
+				SRC_SCENE007 /* RenderQualityManager.swift */,
+				SRC_SCENE008 /* MaterialFactory.swift */,
+				SRC_SCENE009 /* EnvironmentLightingManager.swift */,
+				1D344560766C4FEFB92741E8 /* Camera */,
 			);
 			path = Scene;
 			sourceTree = "<group>";
@@ -398,6 +491,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		E4DA155B2F48AEED00C0E3D5 /* BilliardTrainerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E4DA15642F48AEED00C0E3D5 /* Build configuration list for PBXNativeTarget "BilliardTrainerTests" */;
+			buildPhases = (
+				E4DA15582F48AEED00C0E3D5 /* Sources */,
+				E4DA15592F48AEED00C0E3D5 /* Frameworks */,
+				E4DA155A2F48AEED00C0E3D5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E4DA15612F48AEED00C0E3D5 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				E4DA155D2F48AEED00C0E3D5 /* BilliardTrainerTests */,
+			);
+			name = BilliardTrainerTests;
+			packageProductDependencies = (
+			);
+			productName = BilliardTrainerTests;
+			productReference = E4DA155C2F48AEED00C0E3D5 /* BilliardTrainerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		TARGET /* BilliardTrainer */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = CONFIGLIST /* Build configuration list for PBXNativeTarget "BilliardTrainer" */;
@@ -422,9 +538,13 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1500;
+				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
+					E4DA155B2F48AEED00C0E3D5 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = TARGET;
+					};
 					TARGET = {
 						CreatedOnToolsVersion = 15.0;
 					};
@@ -445,11 +565,19 @@
 			projectRoot = "";
 			targets = (
 				TARGET /* BilliardTrainer */,
+				E4DA155B2F48AEED00C0E3D5 /* BilliardTrainerTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		E4DA155A2F48AEED00C0E3D5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		RESOURCES /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -463,10 +591,22 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		E4DA15582F48AEED00C0E3D5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		SOURCES /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				02CA8E56A04D417198EB5361 /* ObservationController.swift in Sources */,
+				394DBD6C06C7433E8468C8E1 /* AutoAlignController.swift in Sources */,
+				248CDA5A16FF4B3282B219ED /* CameraStateMachine.swift in Sources */,
+				8DDD7CE439624E9A9604D29E /* AimingController.swift in Sources */,
+				A699E560519B4F7894364EE4 /* ViewTransitionController.swift in Sources */,
 				APP001 /* BilliardTrainerApp.swift in Sources */,
 				APP002 /* ContentView.swift in Sources */,
 				HOME001 /* HomeView.swift in Sources */,
@@ -491,6 +631,7 @@
 				PHYS008 /* QuarticSolver.swift in Sources */,
 				PHYS009 /* CushionCollisionModel.swift in Sources */,
 				PHYS010 /* EventDrivenEngine.swift in Sources */,
+				PHYS011 /* TrajectoryPlayback.swift in Sources */,
 				AIM001 /* AimingSystem.swift in Sources */,
 				AIM002 /* DiamondSystem.swift in Sources */,
 				AUDIO001 /* AudioManager.swift in Sources */,
@@ -501,13 +642,28 @@
 				SCENE003 /* TableModelLoader.swift in Sources */,
 				SCENE004 /* CueStick.swift in Sources */,
 				SCENE005 /* TableGeometry.swift in Sources */,
+				SCENE006 /* CameraRig.swift in Sources */,
+				SCENE007 /* RenderQualityManager.swift in Sources */,
+				SCENE008 /* MaterialFactory.swift in Sources */,
+				SCENE009 /* EnvironmentLightingManager.swift in Sources */,
 				TRAIN006 /* CuePointSelectorView.swift in Sources */,
 				TRAIN007 /* PowerGaugeView.swift in Sources */,
 				RULES001 /* GameRules.swift in Sources */,
+				RULES002 /* EightBallGameManager.swift in Sources */,
+				FREEPLAY001 /* FreePlayView.swift in Sources */,
+				FREEPLAY002 /* FreePlayViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		E4DA15612F48AEED00C0E3D5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = TARGET /* BilliardTrainer */;
+			targetProxy = E4DA15602F48AEED00C0E3D5 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		DEBUG /* Debug */ = {
@@ -570,6 +726,54 @@
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
+		};
+		E4DA15622F48AEED00C0E3D5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KWH2GRNSKG;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.xinkuansong.billiard.BilliardTrainerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BilliardTrainer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BilliardTrainer";
+			};
+			name = Debug;
+		};
+		E4DA15632F48AEED00C0E3D5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KWH2GRNSKG;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.xinkuansong.billiard.BilliardTrainerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/BilliardTrainer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/BilliardTrainer";
+			};
+			name = Release;
 		};
 		RELEASE /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -697,6 +901,15 @@
 			buildConfigurations = (
 				TARGET_DEBUG /* Debug */,
 				TARGET_RELEASE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E4DA15642F48AEED00C0E3D5 /* Build configuration list for PBXNativeTarget "BilliardTrainerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E4DA15622F48AEED00C0E3D5 /* Debug */,
+				E4DA15632F48AEED00C0E3D5 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

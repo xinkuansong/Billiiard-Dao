@@ -160,7 +160,7 @@ struct HelpView: View {
                 )
                 HelpItem(
                     title: "如何击球",
-                    description: "确认方向后，向后拖动蓄力，松开即可击球"
+                    description: "确认方向后，用右侧滑条选择力度（0-100），点击击球按钮出杆"
                 )
                 HelpItem(
                     title: "如何选择打点",

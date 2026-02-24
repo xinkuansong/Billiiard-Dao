@@ -8,10 +8,15 @@
 import SwiftUI
 
 struct TrainingListView: View {
+    @State private var showFreePlay = false
+    
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    // 自由练习入口
+                    FreePlayEntryCard(showFreePlay: $showFreePlay)
+                    
                     // 训练场列表
                     ForEach(TrainingGround.allGrounds) { ground in
                         TrainingGroundCard(ground: ground)
@@ -24,7 +29,67 @@ struct TrainingListView: View {
             }
             .navigationTitle("训练")
             .background(Color(.systemGroupedBackground))
+            .fullScreenCover(isPresented: $showFreePlay) {
+                FreePlayView()
+            }
         }
+    }
+}
+
+// MARK: - Free Play Entry Card
+struct FreePlayEntryCard: View {
+    @Binding var showFreePlay: Bool
+    
+    var body: some View {
+        Button {
+            showFreePlay = true
+        } label: {
+            HStack(spacing: 16) {
+                Image(systemName: "sportscourt.fill")
+                    .font(.title)
+                    .foregroundColor(.white)
+                    .frame(width: 60, height: 60)
+                    .background(
+                        LinearGradient(
+                            colors: [.blue, .cyan],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .cornerRadius(12)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("自由练习")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Text("中式八球 · 完整规则 · 验证物理引擎")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                Image(systemName: "chevron.right")
+                    .foregroundColor(.secondary)
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .cornerRadius(12)
+            .shadow(color: .black.opacity(0.08), radius: 8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(
+                        LinearGradient(
+                            colors: [.blue.opacity(0.3), .cyan.opacity(0.3)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 

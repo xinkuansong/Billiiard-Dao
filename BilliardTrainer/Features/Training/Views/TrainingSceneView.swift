@@ -6,12 +6,14 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct TrainingSceneView: View {
     let config: TrainingConfig
 
     @StateObject private var viewModel: TrainingViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var showPauseMenu: Bool = false
     @State private var showExitConfirm: Bool = false
@@ -53,13 +55,19 @@ struct TrainingSceneView: View {
                     
                     Spacer()
                     
-                    // 右侧：力度条
+                    // 右侧：力度选择条（松手即出杆）
                     if showGameControls {
                         PowerGaugeView(
-                            power: viewModel.sceneViewModel.currentPower,
-                            isCharging: viewModel.sceneViewModel.gameState == .charging
+                            power: Binding(
+                                get: { viewModel.sceneViewModel.currentPower },
+                                set: { viewModel.sceneViewModel.currentPower = $0 }
+                            ),
+                            enabled: viewModel.sceneViewModel.gameState == .aiming,
+                            onRelease: {
+                                viewModel.sceneViewModel.executeStrokeFromSlider()
+                            }
                         )
-                        .padding(.trailing, 16)
+                        .padding(.trailing, 2)
                     }
                 }
                 .padding(.bottom, 8)
@@ -108,16 +116,16 @@ struct TrainingSceneView: View {
             }
         }
         .onAppear {
-            print("[TrainingSceneView] 📱 onAppear 触发")
-            // 强制横屏
             OrientationHelper.forceLandscape()
-            print("[TrainingSceneView] 📱 开始训练...")
             viewModel.startTraining()
-            print("[TrainingSceneView] ✅ 训练已启动")
         }
         .onDisappear {
-            // 恢复竖屏
             OrientationHelper.restorePortrait()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                OrientationHelper.forceLandscape()
+            }
         }
         .alert("确定退出训练?", isPresented: $showExitConfirm) {
             Button("继续训练", role: .cancel) {
@@ -133,8 +141,7 @@ struct TrainingSceneView: View {
     
     /// 是否显示游戏控件（打点选择器、力度条）
     private var showGameControls: Bool {
-        let state = viewModel.sceneViewModel.gameState
-        return state == .aiming || state == .charging
+        viewModel.sceneViewModel.gameState == .aiming
     }
 
     // MARK: - Actions
@@ -295,9 +302,7 @@ private struct BottomHint: View {
         case .placing:
             return "拖动放置母球 | 点击确认位置"
         case .aiming:
-            return "拖动调整方向 | 长按蓄力击球"
-        case .charging:
-            return "松开击球"
+            return "拖动调整方向 | 右侧滑条选力度松手出杆"
         case .ballsMoving:
             return "等待球停止..."
         case .turnEnd:

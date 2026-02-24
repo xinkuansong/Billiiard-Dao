@@ -1,0 +1,57 @@
+name: Physics PR Gate
+
+on:
+  pull_request:
+    paths:
+      - "BilliardTrainer/Core/Physics/**"
+      - "BilliardTrainer/Utilities/Constants/PhysicsConstants.swift"
+      - "BilliardTrainerTests/**"
+      - "scripts/physics/**"
+      - ".github/workflows/physics-pr-gate.yml"
+
+jobs:
+  physics-pr-gate:
+    runs-on: macos-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Export pooltool baselines (best effort)
+        run: |
+          python scripts/physics/export_pooltool_baseline.py || true
+
+      - name: Run fast physics suites
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project BilliardTrainer.xcodeproj \
+            -scheme BilliardTrainer \
+            -destination "platform=iOS Simulator,name=iPhone 17" \
+            -resultBundlePath build/PhysicsPRGate.xcresult \
+            -only-testing:BilliardTrainerTests/AnalyticalMotionTests \
+            -only-testing:BilliardTrainerTests/CollisionDetectorTests \
+            -only-testing:BilliardTrainerTests/CollisionResolverTests \
+            -only-testing:BilliardTrainerTests/QuarticSolverTests \
+            -only-testing:BilliardTrainerTests/CueBallStrikeTests \
+            -only-testing:BilliardTrainerTests/EventDrivenEngineTests \
+            -only-testing:BilliardTrainerTests/PhysicsRegressionTests \
+            -only-testing:BilliardTrainerTests/TrajectoryPlaybackTests \
+            -only-testing:BilliardTrainerTests/CrossEngineComparisonTests | xcpretty
+
+      - name: Upload physics artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: physics-pr-artifacts
+          path: |
+            build/PhysicsPRGate.xcresult
+            BilliardTrainerTests/Fixtures/CrossEngine/*.pooltool-output.json
+          if-no-files-found: ignore
+

@@ -59,52 +59,61 @@ struct QuarticSolver {
         
         let cubicRoots = solveCubic(a: cubicA, b: cubicB, c: cubicC, d: cubicD)
         
-        // Find a real positive root of the resolvent cubic
-        guard let u = cubicRoots.first(where: { $0 > 0 }) else {
-            // No real roots if resolvent has no positive root
+        // Handle biquadratic case (q ≈ 0): y^4 + py^2 + r = 0
+        if abs(q) < 1e-10 {
+            let quadRoots = solveQuadratic(a: 1.0, b: p, c: r)
+            var roots: [Double] = []
+            for y2 in quadRoots {
+                if y2 >= -1e-10 {
+                    let y2Clamped = max(0, y2)
+                    roots.append(sqrt(y2Clamped))
+                    if y2Clamped > 1e-14 {
+                        roots.append(-sqrt(y2Clamped))
+                    }
+                }
+            }
+            let offset = bNorm / 4.0
+            roots = roots.map { $0 - offset }
+            roots = roots.compactMap { refineRoot(a: a, b: b, c: c, d: d, e: e, x0: $0) }
+            return removeDuplicates(roots.sorted(), tolerance: 1e-8)
+        }
+        
+        // Find a real positive root u of the resolvent cubic (u = alpha^2)
+        guard let u = cubicRoots.first(where: { $0 > 1e-14 }) else {
             return []
         }
         
-        let sqrt2U = sqrt(2.0 * u)
+        // Factor depressed quartic: (y^2 + alpha*y + beta)(y^2 - alpha*y + gamma) = 0
+        let alpha = sqrt(u)
+        let beta  = (p + u) / 2.0 - q / (2.0 * alpha)
+        let gamma = (p + u) / 2.0 + q / (2.0 * alpha)
         
-        // Solve two quadratics
         var roots: [Double] = []
         
-        // First quadratic: y^2 + sqrt(2u)y + (p/2 + u/2 - q/(2sqrt(2u))) = 0
-        let term1 = p / 2.0 + u / 2.0
-        let term2 = q / (2.0 * sqrt2U)
-        let disc1 = 2.0 * u - 2.0 * p - 4.0 * term1 + 4.0 * term2
-        
-        if disc1 >= 0 {
-            let sqrtDisc1 = sqrt(disc1)
-            roots.append((-sqrt2U + sqrtDisc1) / 2.0)
-            roots.append((-sqrt2U - sqrtDisc1) / 2.0)
+        // First quadratic: y^2 + alpha*y + beta = 0
+        let disc1 = alpha * alpha - 4.0 * beta
+        if disc1 >= -1e-10 {
+            let sqrtDisc1 = sqrt(max(0, disc1))
+            roots.append((-alpha + sqrtDisc1) / 2.0)
+            roots.append((-alpha - sqrtDisc1) / 2.0)
         }
         
-        // Second quadratic: y^2 - sqrt(2u)y + (p/2 + u/2 + q/(2sqrt(2u))) = 0
-        let term3 = p / 2.0 + u / 2.0
-        let term4 = q / (2.0 * sqrt2U)
-        let disc2 = 2.0 * u - 2.0 * p - 4.0 * term3 - 4.0 * term4
-        
-        if disc2 >= 0 {
-            let sqrtDisc2 = sqrt(disc2)
-            roots.append((sqrt2U + sqrtDisc2) / 2.0)
-            roots.append((sqrt2U - sqrtDisc2) / 2.0)
+        // Second quadratic: y^2 - alpha*y + gamma = 0
+        let disc2 = alpha * alpha - 4.0 * gamma
+        if disc2 >= -1e-10 {
+            let sqrtDisc2 = sqrt(max(0, disc2))
+            roots.append((alpha + sqrtDisc2) / 2.0)
+            roots.append((alpha - sqrtDisc2) / 2.0)
         }
         
-        // Convert back from y to x: x = y - b/4
+        // Convert back from y to x: x = y - b/(4a)
         let offset = bNorm / 4.0
         roots = roots.map { $0 - offset }
         
-        // Filter out complex roots (shouldn't happen, but check for NaN/Inf)
-        roots = roots.filter { root in
-            root.isFinite && !root.isNaN
-        }
+        // Polish roots with Newton-Raphson and filter non-real artifacts
+        roots = roots.compactMap { refineRoot(a: a, b: b, c: c, d: d, e: e, x0: $0) }
         
-        // Remove duplicates and sort
-        roots = Array(Set(roots)).sorted()
-        
-        return roots
+        return removeDuplicates(roots.sorted(), tolerance: 1e-8)
     }
     
     // MARK: - Helper Methods
@@ -180,5 +189,36 @@ struct QuarticSolver {
         // Filter and sort
         roots = roots.filter { $0.isFinite && !$0.isNaN }
         return roots.sorted()
+    }
+    
+    /// Newton-Raphson polishing: refine an approximate root of ax^4+bx^3+cx^2+dx+e
+    /// Returns nil if the root diverges or is not actually near a real root.
+    private static func refineRoot(a: Double, b: Double, c: Double, d: Double, e: Double, x0: Double, maxIter: Int = 8) -> Double? {
+        var x = x0
+        for _ in 0..<maxIter {
+            let f  = ((((a * x + b) * x + c) * x + d) * x + e)
+            let df = (((4 * a * x + 3 * b) * x + 2 * c) * x + d)
+            if abs(df) < 1e-30 { break }
+            let dx = f / df
+            x -= dx
+            if abs(dx) < 1e-14 { break }
+        }
+        guard x.isFinite && !x.isNaN else { return nil }
+        let residual = abs(((((a * x + b) * x + c) * x + d) * x + e))
+        let scale = max(1.0, abs(a) + abs(b) + abs(c) + abs(d) + abs(e))
+        if residual / scale > 1e-6 { return nil }
+        return x
+    }
+    
+    /// Remove duplicate roots within a tolerance
+    private static func removeDuplicates(_ sorted: [Double], tolerance: Double) -> [Double] {
+        guard !sorted.isEmpty else { return [] }
+        var result = [sorted[0]]
+        for i in 1..<sorted.count {
+            if abs(sorted[i] - result.last!) > tolerance {
+                result.append(sorted[i])
+            }
+        }
+        return result
     }
 }

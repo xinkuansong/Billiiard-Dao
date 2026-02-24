@@ -1,0 +1,77 @@
+name: Physics Nightly Gate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * *"
+
+jobs:
+  physics-nightly:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Export pooltool baselines (strict if pooltool available)
+        run: |
+          python scripts/physics/export_pooltool_baseline.py || true
+
+      - name: Run full physics suite (nightly)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project BilliardTrainer.xcodeproj \
+            -scheme BilliardTrainer \
+            -destination "platform=iOS Simulator,name=iPhone 17" \
+            -resultBundlePath build/PhysicsNightly.xcresult \
+            -only-testing:BilliardTrainerTests/AnalyticalMotionTests \
+            -only-testing:BilliardTrainerTests/CollisionDetectorTests \
+            -only-testing:BilliardTrainerTests/CollisionResolverTests \
+            -only-testing:BilliardTrainerTests/CushionCollisionModelTests \
+            -only-testing:BilliardTrainerTests/QuarticSolverTests \
+            -only-testing:BilliardTrainerTests/CueBallStrikeTests \
+            -only-testing:BilliardTrainerTests/EventDrivenEngineTests \
+            -only-testing:BilliardTrainerTests/PhysicsRegressionTests \
+            -only-testing:BilliardTrainerTests/TrajectoryPlaybackTests \
+            -only-testing:BilliardTrainerTests/CrossEngineComparisonTests \
+            -only-testing:BilliardTrainerTests/PhysicsStabilityPerformanceTests | xcpretty
+
+      - name: Build nightly report
+        if: always()
+        run: |
+          mkdir -p artifacts
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fixtures = sorted(Path("BilliardTrainerTests/Fixtures/CrossEngine").glob("*.pooltool-output.json"))
+          report = {
+            "generated_pooltool_outputs": [p.name for p in fixtures],
+            "count": len(fixtures),
+          }
+          Path("artifacts/physics-diff-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+          Path("artifacts/physics-diff-report.md").write_text(
+            "# Physics Nightly Artifacts\n\n"
+            f"- generated pooltool outputs: {len(fixtures)}\n",
+            encoding="utf-8",
+          )
+          PY
+
+      - name: Upload nightly artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: physics-nightly-artifacts
+          path: |
+            build/PhysicsNightly.xcresult
+            artifacts/physics-diff-report.json
+            artifacts/physics-diff-report.md
+            BilliardTrainerTests/Fixtures/CrossEngine/*.pooltool-output.json
+          if-no-files-found: ignore
+

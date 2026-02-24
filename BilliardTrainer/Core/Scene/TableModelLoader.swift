@@ -188,6 +188,16 @@ class TableModelLoader {
         let appliedScale = SCNVector3(uniformScale, uniformScale, uniformScale)
         visualNode.scale = appliedScale
         
+        // 验证：缩放后球桌外框尺寸是否与物理常数目标一致
+        let scaledLength = actualLength * uniformScale
+        let scaledWidth = actualWidth * uniformScale
+        let lengthTolerance: Float = 0.02   // 2cm（因使用统一缩放，长宽可能略有偏差）
+        let widthTolerance: Float = 0.02
+        let lengthMatch = abs(scaledLength - targetOuterLength) <= lengthTolerance
+        let widthMatch = abs(scaledWidth - targetOuterWidth) <= widthTolerance
+        print("[TableModelLoader] 📐 球桌尺寸验证: 缩放后 长=\(String(format: "%.3f", scaledLength))m / 宽=\(String(format: "%.3f", scaledWidth))m")
+        print("[TableModelLoader] 📐 球桌尺寸验证: 目标值 长=\(String(format: "%.3f", targetOuterLength))m / 宽=\(String(format: "%.3f", targetOuterWidth))m → 一致=\(lengthMatch && widthMatch ? "✓" : "✗") (长\(lengthMatch ? "✓" : "✗") 宽\(widthMatch ? "✓" : "✗"))")
+        
         // 居中模型：将模型水平面中心对齐到场景原点
         let centerX = (modelMin.x + modelMax.x) / 2.0
         let centerZ = (modelMin.z + modelMax.z) / 2.0
@@ -218,6 +228,10 @@ class TableModelLoader {
         }
         
         print("[TableModelLoader] 库边顶部(世界): \(railTopInWorld), 库边高度: \(TablePhysics.cushionHeight), 台面: \(surfaceY)")
+        
+        // 说明：模型台面高度 surfaceY 可能任意（常见为 0 附近），BilliardScene 会用 yOffset 将整桌抬/降到 TablePhysics.height，故最终台面必对齐常数
+        let yOffset = TablePhysics.height - surfaceY
+        print("[TableModelLoader] 📐 球桌台面高度: 模型 surfaceY=\(String(format: "%.3f", surfaceY))m → 将用 yOffset=\(String(format: "%.3f", yOffset))m 对齐到 TablePhysics.height=\(String(format: "%.3f", TablePhysics.height))m ✓")
         
         // 恢复球节点（作为视觉装饰保留在模型中）
         for (ball, parent) in removedBalls {

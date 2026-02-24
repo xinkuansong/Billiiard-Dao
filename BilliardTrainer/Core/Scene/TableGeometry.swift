@@ -25,6 +25,44 @@ struct CircularCushionSegment {
     let radius: Float
     let startAngle: Float
     let endAngle: Float
+    
+    /// Check whether an angle (radians, measured from +X axis CCW in the XZ plane)
+    /// falls within this arc segment's angular range.
+    func isAngleInRange(_ angle: Float) -> Bool {
+        let twoPi = Float.pi * 2
+        var a = angle.truncatingRemainder(dividingBy: twoPi)
+        if a < 0 { a += twoPi }
+        
+        var s = startAngle.truncatingRemainder(dividingBy: twoPi)
+        if s < 0 { s += twoPi }
+        var e = endAngle.truncatingRemainder(dividingBy: twoPi)
+        if e < 0 { e += twoPi }
+        
+        let eps: Float = 0.01
+        if s <= e {
+            return a >= s - eps && a <= e + eps
+        } else {
+            return a >= s - eps || a <= e + eps
+        }
+    }
+    
+    /// Outward-pointing normal at the given ball position (from arc center toward ball).
+    func normal(at ballPosition: SCNVector3) -> SCNVector3 {
+        let dx = ballPosition.x - center.x
+        let dz = ballPosition.z - center.z
+        let len = sqrtf(dx * dx + dz * dz)
+        guard len > 1e-8 else { return SCNVector3(1, 0, 0) }
+        return SCNVector3(dx / len, 0, dz / len)
+    }
+    
+    /// Angle (radians) from arc center to the given point in the XZ plane.
+    func angle(to point: SCNVector3) -> Float {
+        let dx = point.x - center.x
+        let dz = point.z - center.z
+        var a = atan2f(dz, dx)
+        if a < 0 { a += Float.pi * 2 }
+        return a
+    }
 }
 
 struct TableGeometry {
@@ -136,46 +174,48 @@ struct TableGeometry {
         // Build circular cushion segments for pocket fillets
         var circularCushions: [CircularCushionSegment] = []
         
-        // Corner pocket fillets: R105mm quarter circles connecting adjacent rails
-        // Fillet centers are based on playfield corners (railHalfLength/railHalfWidth), not pocket centers
+        // Corner pocket fillets: each corner has TWO jaw arcs with a gap for the pocket opening.
+        // Gap half-angle derived from pocket diameter vs fillet radius:
+        //   chord = 2 * R_fillet * sin(gapHalf) = pocketDiameter
+        //   gapHalf = asin(pocketRadius / filletRadius)
+        let cornerGapHalf = asinf(min(cornerPocketRadius / cornerFilletRadius, 1.0))
+        
         for pocket in pockets where pocket.isCorner {
             let pocketX = pocket.center.x
             let pocketZ = pocket.center.z
             
-            // Fillet center is at the playfield corner, offset inward by fillet radius
-            // This places the fillet where the two rails meet at the playfield boundary
             let filletCenterX = (pocketX > 0 ? railHalfLength : -railHalfLength) - (pocketX > 0 ? cornerFilletRadius : -cornerFilletRadius)
             let filletCenterZ = (pocketZ > 0 ? railHalfWidth : -railHalfWidth) - (pocketZ > 0 ? cornerFilletRadius : -cornerFilletRadius)
             let filletCenter = SCNVector3(filletCenterX, y, filletCenterZ)
             
-            // Determine angle range based on corner position
-            // Angles measured from positive X axis, counterclockwise
-            var startAngle: Float = 0
-            var endAngle: Float = Float.pi / 2
+            // Quarter-circle base angles (the full 90° range before splitting)
+            var qStart: Float = 0
+            var qEnd: Float = Float.pi / 2
             
             if pocketX < 0 && pocketZ < 0 {
-                // Bottom-left corner: fillet connects -X rail to -Z rail
-                startAngle = Float.pi
-                endAngle = 3 * Float.pi / 2
+                qStart = Float.pi;       qEnd = 3 * Float.pi / 2
             } else if pocketX < 0 && pocketZ > 0 {
-                // Top-left corner: fillet connects -X rail to +Z rail
-                startAngle = Float.pi / 2
-                endAngle = Float.pi
+                qStart = Float.pi / 2;   qEnd = Float.pi
             } else if pocketX > 0 && pocketZ < 0 {
-                // Bottom-right corner: fillet connects +X rail to -Z rail
-                startAngle = 3 * Float.pi / 2
-                endAngle = 2 * Float.pi
-            } else {
-                // Top-right corner: fillet connects +X rail to +Z rail
-                startAngle = 0
-                endAngle = Float.pi / 2
+                qStart = 3 * Float.pi / 2; qEnd = 2 * Float.pi
             }
             
+            // Gap center = midpoint of the quarter circle = direction toward pocket center
+            let gapCenter = (qStart + qEnd) / 2
+            
+            // Jaw 1: from rail junction to gap start
             circularCushions.append(CircularCushionSegment(
                 center: filletCenter,
                 radius: cornerFilletRadius,
-                startAngle: startAngle,
-                endAngle: endAngle
+                startAngle: qStart,
+                endAngle: gapCenter - cornerGapHalf
+            ))
+            // Jaw 2: from gap end to rail junction
+            circularCushions.append(CircularCushionSegment(
+                center: filletCenter,
+                radius: cornerFilletRadius,
+                startAngle: gapCenter + cornerGapHalf,
+                endAngle: qEnd
             ))
         }
         

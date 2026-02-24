@@ -16,8 +16,9 @@ class OrientationHelper {
     
     /// 强制横屏
     static func forceLandscape() {
-        orientationMask = .landscape
-        requestOrientationUpdate(.landscapeRight)
+        let targetOrientation = preferredLandscapeOrientation()
+        orientationMask = targetOrientation == .landscapeLeft ? .landscapeLeft : .landscapeRight
+        requestOrientationUpdate(targetOrientation)
     }
     
     /// 恢复竖屏
@@ -28,11 +29,49 @@ class OrientationHelper {
     
     private static func requestOrientationUpdate(_ orientation: UIInterfaceOrientation) {
         guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
-        let geometryPreferences = UIWindowScene.GeometryPreferences.iOS(
-            interfaceOrientations: orientation.isLandscape ? .landscape : .portrait
-        )
+        
+        // 先通知 VC 更新 supportedInterfaceOrientations，再请求系统旋转
+        windowScene.windows.forEach { window in
+            window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+        if #unavailable(iOS 16.0) {
+            UIViewController.attemptRotationToDeviceOrientation()
+        }
+        
+        let targetMask: UIInterfaceOrientationMask
+        switch orientation {
+        case .landscapeLeft:
+            targetMask = .landscapeLeft
+        case .landscapeRight:
+            targetMask = .landscapeRight
+        case .portrait:
+            targetMask = .portrait
+        case .portraitUpsideDown:
+            targetMask = .portraitUpsideDown
+        default:
+            targetMask = orientationMask
+        }
+        
+        let geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: targetMask)
         windowScene.requestGeometryUpdate(geometryPreferences) { error in
             print("[OrientationHelper] Geometry update error: \(error)")
+        }
+    }
+    
+    private static func preferredLandscapeOrientation() -> UIInterfaceOrientation {
+        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+            if scene.interfaceOrientation == .landscapeLeft || scene.interfaceOrientation == .landscapeRight {
+                return scene.interfaceOrientation
+            }
+        }
+        
+        switch UIDevice.current.orientation {
+        case .landscapeLeft:
+            return .landscapeRight
+        case .landscapeRight:
+            return .landscapeLeft
+        default:
+            return .landscapeRight
         }
     }
 }

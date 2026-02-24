@@ -112,10 +112,11 @@ class TrainingViewModel: ObservableObject {
     // MARK: - Setup
 
     private func setupBindings() {
-        // 监听游戏状态变化
+        // 监听游戏状态变化 → 转发给 SwiftUI 以刷新 showGameControls 等依赖
         sceneViewModel.$gameState
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
+                self?.objectWillChange.send()
                 self?.handleGameStateChange(state)
             }
             .store(in: &cancellables)
@@ -153,6 +154,8 @@ class TrainingViewModel: ObservableObject {
 
     /// 开始训练
     func startTraining() {
+        sceneViewModel.scene.setCameraMode(.aim, animated: false)
+        
         // 重置状态
         currentScore = 0
         remainingBalls = config.goalCount
@@ -204,19 +207,20 @@ class TrainingViewModel: ObservableObject {
     // MARK: - Scene Setup
 
     private func setupScene() {
-        // 根据训练类型设置场景
+        // 根据训练类型设置场景；若有 ballPositions（如一星瞄准 2 球）则一并传入
+        let ballPositions: [BallPosition]? = config.ballPositions.isEmpty ? nil : config.ballPositions
         switch config.trainingType {
         case .aiming:
-            sceneViewModel.setupTrainingScene(type: .aiming(difficulty: config.difficulty))
+            sceneViewModel.setupTrainingScene(type: .aiming(difficulty: config.difficulty), ballPositions: ballPositions)
         case .spin:
             let spinType = spinTypeForDifficulty(config.difficulty)
-            sceneViewModel.setupTrainingScene(type: .spin(spinType))
+            sceneViewModel.setupTrainingScene(type: .spin(spinType), ballPositions: ballPositions)
         case .bankShot:
-            sceneViewModel.setupTrainingScene(type: .bankShot)
+            sceneViewModel.setupTrainingScene(type: .bankShot, ballPositions: ballPositions)
         case .kickShot:
-            sceneViewModel.setupTrainingScene(type: .kickShot)
+            sceneViewModel.setupTrainingScene(type: .kickShot, ballPositions: ballPositions)
         case .diamond:
-            sceneViewModel.setupTrainingScene(type: .kickShot) // 使用K球场景
+            sceneViewModel.setupTrainingScene(type: .kickShot, ballPositions: ballPositions) // 使用K球场景
         }
     }
 

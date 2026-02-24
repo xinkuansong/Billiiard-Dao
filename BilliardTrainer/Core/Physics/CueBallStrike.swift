@@ -62,10 +62,12 @@ struct CueBallStrike {
         let vy_ball: Float = 0  // vertical component ignored (stays on table)
         let vz_ball: Float = -v * cosT
         
-        // Angular velocity in ball frame
-        let wx_ball = (v / I_m) * (-ball_c * sinT + ball_b * cosT)
-        let wy_ball = (v / I_m) * (ball_a * sinT)
-        let wz_ball = (v / I_m) * (-ball_a * cosT)
+        // Angular velocity in SceneKit ball frame (y-up)
+        // Derived from omega ∝ Q × F where Q = [ball_a, ball_b, ball_c],
+        // F = [0, -sinT, -cosT] in SceneKit's (x=side, y=up, z=forward) frame
+        let wx_ball = (v / I_m) * (-ball_b * cosT + ball_c * sinT)
+        let wy_ball = (v / I_m) * (ball_a * cosT)
+        let wz_ball = (v / I_m) * (-ball_a * sinT)
         
         // Rotate from ball frame to table frame by phi
         // Ball frame z-axis aligns with initial cue direction
@@ -128,8 +130,10 @@ struct CueBallStrike {
         spinY: Float,
         elevation: Float = 0
     ) -> (velocity: SCNVector3, angularVelocity: SCNVector3, squirtAngle: Float) {
-        // Calculate phi from aim direction
-        let phi = atan2f(aimDirection.x, aimDirection.z)
+        // Calculate phi from aim direction.
+        // Base forward vector in this strike model is -Z, so Z needs sign flip
+        // to map velocity direction consistently with aimDirection.
+        let phi = atan2f(aimDirection.x, -aimDirection.z)
         
         // Get squirt angle
         let squirt = squirtAngle(a: spinX)

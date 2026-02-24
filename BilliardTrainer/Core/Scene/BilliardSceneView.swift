@@ -16,23 +16,20 @@ struct BilliardSceneView: UIViewRepresentable {
     
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
-        
-        // 配置SceneKit视图
+        let flags = RenderQualityManager.shared.featureFlags
+
         scnView.scene = viewModel.scene
-        scnView.allowsCameraControl = false  // 我们自己控制相机
+        scnView.allowsCameraControl = false
         scnView.showsStatistics = false
         scnView.backgroundColor = .clear
-        scnView.antialiasingMode = .multisampling4X
-        scnView.preferredFramesPerSecond = 60
+        scnView.antialiasingMode = flags.antialiasingMode
+        scnView.preferredFramesPerSecond = min(flags.maxFPS, UIScreen.main.maximumFramesPerSecond)
         scnView.isPlaying = true
         scnView.pointOfView = viewModel.scene.cameraNode
-        
-        // 添加手势
+
         setupGestures(scnView, context: context)
-        
-        // 启动渲染循环（更新第一人称相机和球杆）
         context.coordinator.startRenderLoop(for: scnView)
-        
+
         return scnView
     }
     
@@ -60,6 +57,7 @@ struct BilliardSceneView: UIViewRepresentable {
             target: context.coordinator,
             action: #selector(Coordinator.handlePan(_:))
         )
+        panGesture.delegate = context.coordinator
         view.addGestureRecognizer(panGesture)
         
         // 双指捏合 - 缩放
@@ -86,6 +84,15 @@ struct BilliardSceneView: UIViewRepresentable {
         doubleTap.numberOfTapsRequired = 2
         view.addGestureRecognizer(doubleTap)
         
+        // 双指双击 - 快速回中/全台观察
+        let twoFingerDoubleTap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleTwoFingerDoubleTap(_:))
+        )
+        twoFingerDoubleTap.numberOfTapsRequired = 2
+        twoFingerDoubleTap.numberOfTouchesRequired = 2
+        view.addGestureRecognizer(twoFingerDoubleTap)
+        
         // 单击 - 选择/确认
         let singleTap = UITapGestureRecognizer(
             target: context.coordinator,
@@ -94,27 +101,35 @@ struct BilliardSceneView: UIViewRepresentable {
         singleTap.require(toFail: doubleTap)
         view.addGestureRecognizer(singleTap)
         
-        // 长按 - 击球蓄力
-        let longPress = UILongPressGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleLongPress(_:))
-        )
-        longPress.minimumPressDuration = 0.3
-        view.addGestureRecognizer(longPress)
+        // 长按手势已移除 — 力度通过右侧滑条控制
     }
     
     // MARK: - Coordinator
     
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var viewModel: BilliardSceneViewModel
         
         private var lastPanLocation: CGPoint = .zero
-        private var strokeStartTime: Date?
-        private var chargeTimer: Timer?
+        private var isDraggingCueBall: Bool = false
+        
+        /// HUD 控件所在的屏幕边缘宽度（左侧打点器、右侧力度条）
+        private let hudEdgeMargin: CGFloat = 130
         
         /// 渲染循环回调（用于更新第一人称相机和球杆）
         private var displayLink: CADisplayLink?
         private weak var scnView: SCNView?
+        private var lastTimestamp: CFTimeInterval?
+        private var lastAimLineUpdateTimestamp: CFTimeInterval = 0
+        
+        private enum PanAxisLock {
+            case undecided
+            case horizontal
+            case vertical
+        }
+        private var panAxisLock: PanAxisLock = .undecided
+
+        /// 2D 区域缩放锚点（屏幕坐标）
+        private var topDownPinchAnchorScreen: CGPoint?
         
         init(viewModel: BilliardSceneViewModel) {
             self.viewModel = viewModel
@@ -136,44 +151,98 @@ struct BilliardSceneView: UIViewRepresentable {
         func stopRenderLoop() {
             displayLink?.invalidate()
             displayLink = nil
+            lastTimestamp = nil
         }
         
         @objc private func renderUpdate() {
+            let now = displayLink?.timestamp ?? CACurrentMediaTime()
+            
+            // 轨迹回放：逐帧驱动球位置（必须在 shadow/camera 更新之前）
+            viewModel.updateTrajectoryPlaybackFrame(timestamp: now)
+            
+            viewModel.scene.updateShadowPositions()
             guard let cueBall = viewModel.scene.cueBallNode else { return }
-            
-            // 更新第一人称相机
-            if viewModel.scene.currentCameraMode == .firstPerson {
-                viewModel.scene.updateFirstPersonCamera(
-                    cueBallPosition: cueBall.position,
-                    aimDirection: viewModel.aimDirection,
-                    pitchAngle: viewModel.pitchAngle
-                )
+            let cueCenter = viewModel.scene.visualCenter(of: cueBall)
+            let deltaTime: Float
+            if let last = lastTimestamp {
+                let dt = max(1.0 / 240.0, min(1.0 / 20.0, now - last))
+                deltaTime = Float(dt)
+                RenderQualityManager.shared.recordFrameTime(dt)
+            } else {
+                deltaTime = 1.0 / 60.0
             }
-            
-            // 更新球杆位置
-            if viewModel.gameState == .aiming || viewModel.gameState == .charging {
-                let pullBack: Float
-                if viewModel.gameState == .charging {
-                    pullBack = viewModel.currentPower * CueStickSettings.maxPullBack
-                } else {
-                    pullBack = 0
+            lastTimestamp = now
+
+            let isTopDown = viewModel.scene.currentCameraMode == .topDown2D
+            let camState = viewModel.scene.cameraStateMachine.currentState
+
+            if isTopDown {
+                viewModel.scene.updateTopDownZoom()
+            } else {
+                if (camState == .aiming || camState == .adjusting) && viewModel.gameState == .aiming {
+                    viewModel.scene.setAimDirectionForCamera(viewModel.aimDirection)
                 }
-                viewModel.cueStick?.update(
-                    cueBallPosition: cueBall.position,
+
+                viewModel.scene.updateCameraRig(
+                    deltaTime: deltaTime,
+                    cueBallPosition: cueCenter
+                )
+
+                if (camState == .aiming || camState == .adjusting), let view = scnView {
+                    viewModel.scene.lockCueBallScreenAnchor(
+                        in: view,
+                        cueBallWorld: cueCenter,
+                        anchorNormalized: CGPoint(x: 0.5, y: 0.5)
+                    )
+                }
+            }
+
+            viewModel.pitchAngle = viewModel.scene.cameraNode.eulerAngles.x
+            
+            // 更新球杆位置（含碰撞检测仰角）— pullBack 由力度条驱动
+            if viewModel.gameState == .aiming {
+                let pullBack = (viewModel.currentPower / 100.0) * CueStickSettings.maxPullBack
+                let elevation = CueStick.calculateRequiredElevation(
+                    cueBallPosition: cueCenter,
                     aimDirection: viewModel.aimDirection,
-                    pullBack: pullBack
+                    pullBack: pullBack,
+                    ballPositions: viewModel.scene.targetBallPositions()
+                )
+                viewModel.cueStick?.update(
+                    cueBallPosition: cueCenter,
+                    aimDirection: viewModel.aimDirection,
+                    pullBack: pullBack,
+                    elevation: elevation
                 )
             }
             
-            // 更新瞄准线和轨迹预测
-            if viewModel.gameState == .aiming {
-                viewModel.scene.showAimLine(
-                    from: cueBall.position,
-                    direction: viewModel.aimDirection,
-                    length: AimingSystem.maxAimLineLength
-                )
-                viewModel.updateTrajectoryPreview()
+            // 更新瞄准线和轨迹预测（2D 俯视模式下不显示）
+            if viewModel.gameState == .aiming && !isTopDown {
+                if now - lastAimLineUpdateTimestamp >= (1.0 / 45.0) {
+                    viewModel.scene.showAimLine(
+                        from: cueCenter,
+                        direction: viewModel.aimDirection,
+                        length: AimingSystem.maxAimLineLength
+                    )
+                    lastAimLineUpdateTimestamp = now
+                }
+                viewModel.updateTrajectoryPreview(minInterval: 1.0 / 30.0)
             }
+        }
+        
+        // MARK: - UIGestureRecognizerDelegate
+        
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let view = gestureRecognizer.view,
+                  gestureRecognizer is UIPanGestureRecognizer else { return true }
+            let loc = gestureRecognizer.location(in: view)
+            let w = view.bounds.width
+            if viewModel.gameState == .aiming {
+                if loc.x > w - hudEdgeMargin || loc.x < hudEdgeMargin {
+                    return false
+                }
+            }
+            return true
         }
         
         // MARK: - Gesture Handlers
@@ -181,93 +250,178 @@ struct BilliardSceneView: UIViewRepresentable {
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard let view = gesture.view as? SCNView else { return }
             let translation = gesture.translation(in: view)
+            if gesture.state == .began {
+                panAxisLock = .undecided
+            }
+
+            // 2D 俯视模式：单指拖动平移视图
+            if viewModel.scene.currentCameraMode == .topDown2D {
+                if gesture.state == .changed {
+                    viewModel.scene.applyCameraPan(
+                        deltaX: Float(translation.x),
+                        deltaY: Float(translation.y)
+                    )
+                }
+                gesture.setTranslation(.zero, in: view)
+                return
+            }
             
+            let camSM = viewModel.scene.cameraStateMachine
+
             switch viewModel.gameState {
             case .placing:
-                // 母球摆放：拖动母球
-                if gesture.state == .changed {
-                    handlePlacingPan(translation: translation, in: view)
+                switch gesture.state {
+                case .began:
+                    let location = gesture.location(in: view)
+                    let hitResults = view.hitTest(location, options: [.searchMode: SCNHitTestSearchMode.closest.rawValue])
+                    isDraggingCueBall = hitResults.contains { $0.node.name == "cueBall" || $0.node.parent?.name == "cueBall" }
+                case .changed:
+                    if isDraggingCueBall {
+                        handlePlacingPan(gesture: gesture, in: view)
+                    }
+                case .ended, .cancelled:
+                    isDraggingCueBall = false
+                default:
+                    break
                 }
                 
             case .aiming:
-                // 瞄准模式：左右旋转瞄准方向，上下调俯仰
                 if gesture.state == .changed {
-                    let sensitivity = FirstPersonCamera.aimSensitivity
+                    if panAxisLock == .undecided {
+                        let absX = abs(translation.x)
+                        let absY = abs(translation.y)
+                        let threshold: CGFloat = 4
+                        if absX > threshold || absY > threshold {
+                            panAxisLock = absX >= absY ? .horizontal : .vertical
+                            if panAxisLock == .vertical {
+                                camSM.handleEvent(.verticalSwipeBegan)
+                            }
+                        }
+                    }
                     
-                    // 左右 = 旋转瞄准方向
-                    viewModel.updateAimDirection(
-                        deltaX: Float(translation.x) * sensitivity,
-                        deltaY: 0
-                    )
+                    let lockedDX: Float
+                    let lockedDY: Float
+                    switch panAxisLock {
+                    case .horizontal:
+                        lockedDX = Float(translation.x)
+                        lockedDY = 0
+                    case .vertical:
+                        lockedDX = 0
+                        lockedDY = Float(translation.y)
+                    case .undecided:
+                        lockedDX = 0
+                        lockedDY = 0
+                    }
                     
-                    // 上下 = 调整俯仰角（不影响瞄准方向）
-                    let pitchDelta = Float(translation.y) * sensitivity * 0.5
-                    viewModel.pitchAngle = max(
-                        FirstPersonCamera.minPitch,
-                        min(FirstPersonCamera.maxPitch,
-                            viewModel.pitchAngle + pitchDelta)
-                    )
+                    if lockedDX != 0, let aimCtrl = viewModel.scene.aimingController,
+                       let cueBall = viewModel.scene.cueBallNode {
+                        let cueBallPos = viewModel.scene.visualCenter(of: cueBall)
+                        let targetPositions = viewModel.scene.targetBallPositions()
+                        viewModel.aimDirection = aimCtrl.handleHorizontalSwipe(
+                            delta: lockedDX,
+                            currentAimDirection: viewModel.aimDirection,
+                            cueBallPos: cueBallPos,
+                            targetBalls: targetPositions
+                        )
+                        viewModel.updateTrajectoryPreview()
+                    }
+
+                    if lockedDY != 0 {
+                        viewModel.scene.viewTransitionController?.handleVerticalSwipe(delta: -lockedDY)
+                    }
                 }
                 
             case .ballsMoving, .turnEnd, .idle:
-                // 自由旋转相机观察
                 if gesture.state == .changed {
-                    viewModel.scene.rotateCamera(
-                        deltaX: Float(translation.x) * 0.01,
-                        deltaY: Float(translation.y) * 0.01
-                    )
+                    if camSM.currentState == .observing {
+                        viewModel.scene.observationController?.handleObservationPan(
+                            deltaX: Float(translation.x),
+                            deltaY: Float(translation.y)
+                        )
+                    } else {
+                        viewModel.scene.applyCameraPan(
+                            deltaX: Float(translation.x),
+                            deltaY: Float(translation.y)
+                        )
+                    }
                 }
-                
-            case .charging:
-                break
+            }
+            
+            if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed {
+                if panAxisLock == .vertical {
+                    camSM.handleEvent(.verticalSwipeEnded)
+                }
+                panAxisLock = .undecided
             }
             
             gesture.setTranslation(.zero, in: view)
         }
         
-        /// 处理母球摆放拖动
-        private func handlePlacingPan(translation: CGPoint, in view: SCNView) {
+        /// 处理母球摆放拖动：射线投射到台面平面，直接定位白球
+        private func handlePlacingPan(gesture: UIPanGestureRecognizer, in view: SCNView) {
             guard let cueBall = viewModel.scene.cueBallNode else { return }
-            
-            let sensitivity: Float = 0.003
-            var newPos = cueBall.position
-            newPos.x += Float(translation.x) * sensitivity
-            newPos.z += Float(translation.y) * sensitivity
-            
-            // 限制在开球区内（球台左半边）
-            let halfLength = TablePhysics.innerLength / 2
-            let halfWidth = TablePhysics.innerWidth / 2
-            let ballR = BallPhysics.radius
-            
-            newPos.x = max(-halfLength + ballR, min(0, newPos.x))  // 左半区
-            newPos.z = max(-halfWidth + ballR, min(halfWidth - ballR, newPos.z))
-            
-            cueBall.position = newPos
+            let location = gesture.location(in: view)
+
+            let surfaceY = TablePhysics.height + BallPhysics.radius
+            guard let worldPos = unprojectToTablePlane(screenPoint: location, in: view, planeY: surfaceY) else { return }
+
+            var newX = worldPos.x
+            let newZ = worldPos.z
+
+            if viewModel.placingBehindHeadString {
+                let headStringX = BilliardScene.headStringX
+                newX = headStringX >= 0 ? max(newX, headStringX) : min(newX, headStringX)
+            }
+
+            let targetPos = SCNVector3(newX, surfaceY, newZ)
+            viewModel.scene.moveCueBall(to: targetPos)
+        }
+
+        /// 将屏幕坐标投射到 y=planeY 的水平平面
+        private func unprojectToTablePlane(screenPoint: CGPoint, in view: SCNView, planeY: Float) -> SCNVector3? {
+            let nearPoint = view.unprojectPoint(SCNVector3(Float(screenPoint.x), Float(screenPoint.y), 0))
+            let farPoint  = view.unprojectPoint(SCNVector3(Float(screenPoint.x), Float(screenPoint.y), 1))
+            let dir = farPoint - nearPoint
+            guard abs(dir.y) > 1e-6 else { return nil }
+            let t = (planeY - nearPoint.y) / dir.y
+            guard t > 0 else { return nil }
+            return SCNVector3(nearPoint.x + dir.x * t, planeY, nearPoint.z + dir.z * t)
         }
         
         @objc func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+            guard let view = gesture.view as? SCNView else { return }
+
+            if viewModel.scene.currentCameraMode == .topDown2D {
+                switch gesture.state {
+                case .began:
+                    topDownPinchAnchorScreen = gesture.location(in: view)
+                case .changed:
+                    let anchor = topDownPinchAnchorScreen ?? gesture.location(in: view)
+                    viewModel.scene.applyTopDownAreaZoom(
+                        scale: Float(gesture.scale),
+                        anchorScreen: anchor,
+                        in: view
+                    )
+                    gesture.scale = 1.0
+                default:
+                    topDownPinchAnchorScreen = nil
+                }
+                return
+            }
+
             guard gesture.state == .changed else { return }
-            viewModel.scene.zoomCamera(scale: Float(gesture.scale))
+            viewModel.scene.applyCameraPinch(scale: Float(gesture.scale))
+            if viewModel.gameState == .aiming && viewModel.scene.shouldLinkAimDirectionWithCamera() {
+                viewModel.aimDirection = viewModel.scene.currentAimDirectionFromCamera()
+                viewModel.updateTrajectoryPreview()
+            }
             gesture.scale = 1.0
         }
         
         @objc func handleTwoFingerPan(_ gesture: UIPanGestureRecognizer) {
             guard gesture.state == .changed else { return }
             let translation = gesture.translation(in: gesture.view)
-            
-            if viewModel.gameState == .aiming {
-                // 精细瞄准模式：灵敏度降低 5 倍
-                let sensitivity = FirstPersonCamera.fineSensitivity
-                viewModel.updateAimDirection(
-                    deltaX: Float(translation.x) * sensitivity,
-                    deltaY: 0
-                )
-            } else {
-                viewModel.scene.rotateCamera(
-                    deltaX: 0,
-                    deltaY: Float(translation.y) * 0.005
-                )
-            }
+            viewModel.scene.applyCameraPan(deltaX: Float(translation.x), deltaY: Float(translation.y))
             
             gesture.setTranslation(.zero, in: gesture.view)
         }
@@ -277,7 +431,12 @@ struct BilliardSceneView: UIViewRepresentable {
             viewModel.cycleNextCameraMode()
         }
         
+        @objc func handleTwoFingerDoubleTap(_ gesture: UITapGestureRecognizer) {
+            viewModel.toggleViewMode()
+        }
+        
         @objc func handleSingleTap(_ gesture: UITapGestureRecognizer) {
+            guard viewModel.scene.currentCameraMode != .topDown2D else { return }
             guard let view = gesture.view as? SCNView else { return }
             let location = gesture.location(in: view)
             
@@ -293,40 +452,8 @@ struct BilliardSceneView: UIViewRepresentable {
             ])
             
             if let hit = hitResults.first {
-                viewModel.handleTap(on: hit.node, at: hit.localCoordinates)
-            }
-        }
-        
-        @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-            switch gesture.state {
-            case .began:
-                // 开始蓄力
-                guard viewModel.gameState == .aiming else { return }
-                strokeStartTime = Date()
-                viewModel.startCharging()
-                
-                // 启动蓄力计时器，持续更新力度
-                chargeTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-                    guard let self = self, let startTime = self.strokeStartTime else { return }
-                    let duration = Date().timeIntervalSince(startTime)
-                    let power = min(1.0, duration / 2.0)
-                    self.viewModel.currentPower = Float(power)
-                }
-                
-            case .ended, .cancelled:
-                // 释放击球
-                chargeTimer?.invalidate()
-                chargeTimer = nil
-                
-                if let startTime = strokeStartTime, viewModel.gameState == .charging {
-                    let duration = Date().timeIntervalSince(startTime)
-                    let power = min(1.0, duration / 2.0)
-                    viewModel.executeStroke(power: Float(power))
-                }
-                strokeStartTime = nil
-                
-            default:
-                break
+                let node = viewModel.findBallAncestor(hit.node) ?? hit.node
+                viewModel.handleTap(on: node, at: hit.localCoordinates)
             }
         }
         
@@ -349,6 +476,12 @@ class BilliardSceneViewModel: ObservableObject {
     @Published var lastFouls: [Foul] = []
     @Published var lastShotLegal: Bool = true
     
+    /// Whether placing mode restricts cue ball to behind head string
+    var placingBehindHeadString: Bool = false
+
+    /// 观察视角中用户点选的下一颗目标球
+    private(set) var selectedNextTarget: SCNNode?
+    
     // MARK: - Event Callbacks
     
     /// 目标球进袋回调 (ballName, pocketId)
@@ -365,11 +498,11 @@ class BilliardSceneViewModel: ObservableObject {
     /// 球杆
     private(set) var cueStick: CueStick?
     
-    /// 第一人称俯仰角
-    var pitchAngle: Float = FirstPersonCamera.defaultPitch
+    /// 当前击球仰角（与相机 pitch 同步）
+    var pitchAngle: Float = CameraRigConfig.aimPitchRad
     
     /// 当前击球事件记录
-    private var shotEvents: [GameEvent] = []
+    private(set) var shotEvents: [GameEvent] = []
     
     /// 当前击球时间（用于播放中跟踪）
     private(set) var currentShotTime: Float = 0
@@ -380,9 +513,26 @@ class BilliardSceneViewModel: ObservableObject {
     /// 规则分组（默认 open）
     private var currentGroup: BallGroup = .open
     
-    /// 播放中的球动作计数器
-    private var playbackRemainingCount: Int = 0
+    /// CADisplayLink 驱动的轨迹回放器
+    private(set) var trajectoryPlayback: TrajectoryPlayback?
+    
+    /// 回放起始时间戳（CADisplayLink timestamp）
+    private(set) var playbackStartTime: CFTimeInterval = 0
 
+    /// 延迟观察视角：首次球-球碰撞的模拟时间（nil 表示整局无碰撞）
+    private var pendingObservationContactTime: Float?
+    /// 延迟观察视角：击球时的上下文
+    private var pendingObservationContext: (cueBallPosition: SCNVector3, aimDirection: SCNVector3)?
+    /// 延迟观察视角：是否已触发过
+    private var hasTriggeredObservation: Bool = false
+    /// 无碰撞时的后备延迟（秒）
+    private let observationFallbackDelay: Float = 0.8
+
+    /// 轨迹预测节流与变化阈值缓存
+    private var lastTrajectoryPreviewTimestamp: CFTimeInterval = 0
+    private var lastTrajectoryCueBallPos: SCNVector3?
+    private var lastTrajectoryAimDirection: SCNVector3?
+    
     /// 推进当前击球时间
     func advanceShotTime(delta: Float) {
         currentShotTime += delta
@@ -393,18 +543,47 @@ class BilliardSceneViewModel: ObservableObject {
     enum GameState {
         case idle           // 空闲
         case placing        // 母球摆放
-        case aiming         // 瞄准中
-        case charging       // 蓄力中
+        case aiming         // 瞄准中（力度由滑条控制）
         case ballsMoving    // 球在运动
         case turnEnd        // 回合结束
     }
     
+    /// 摄像系统状态机的便利访问
+    var cameraMachineState: CameraState {
+        scene.cameraStateMachine.currentState
+    }
+
+    /// 旧式相机状态（兼容 UI 层和测试）
+    enum LegacyCameraState: Equatable {
+        case aim
+        case action
+        case topDown2D
+    }
+
+    var cameraState: LegacyCameraState {
+        if isTopDownView { return .topDown2D }
+        switch scene.cameraStateMachine.currentState {
+        case .observing: return .action
+        case .aiming, .adjusting, .shooting, .returnToAim: return .aim
+        }
+    }
+
     // MARK: - Initialization
     
     init() {
-        print("[BilliardSceneViewModel] 🏗️ init 开始...")
+        print("[BilliardSceneViewModel] init 开始...")
         scene = BilliardScene()
-        print("[BilliardSceneViewModel] ✅ init 完成")
+        
+        scene.onCameraModeChanged = { [weak self] mode in
+            self?.isTopDownView = (mode == .topDown2D)
+        }
+
+        scene.cameraStateMachine.onStateChanged = { [weak self] oldState, newState in
+            print("[CameraStateMachine] \(oldState) -> \(newState)")
+            self?.handleCameraStateTransition(from: oldState, to: newState)
+        }
+        
+        print("[BilliardSceneViewModel] init 完成")
     }
     
     /// 所有球停止运动后的处理（由 SCNAction 播放完成触发）
@@ -433,6 +612,57 @@ class BilliardSceneViewModel: ObservableObject {
         
         // 先进入回合结束状态
         gameState = .turnEnd
+
+        // 通知摄像状态机：球停止
+        scene.cameraStateMachine.handleEvent(.ballsStopped)
+    }
+
+    /// 处理摄像状态机转换
+    private func handleCameraStateTransition(from oldState: CameraState, to newState: CameraState) {
+        switch newState {
+        case .aiming:
+            if oldState == .returnToAim {
+                if let selected = selectedNextTarget, selected.parent != nil,
+                   let cueBall = scene.cueBallNode {
+                    let targetPos = scene.visualCenter(of: selected)
+                    let cueBallPos = scene.visualCenter(of: cueBall)
+                    aimDirection = SCNVector3(
+                        targetPos.x - cueBallPos.x, 0, targetPos.z - cueBallPos.z
+                    ).normalized()
+                } else {
+                    aimDirection = scene.cameraStateMachine.savedAimDirection
+                }
+                clearNextTargetSelection()
+                setupCueStick()
+                scene.setAimDirectionForCamera(aimDirection)
+            }
+        case .returnToAim:
+            if !isTopDownView, let cueBall = scene.cueBallNode {
+                let cueBallPos = scene.visualCenter(of: cueBall)
+                var targetDir: SCNVector3?
+                if let selected = selectedNextTarget, selected.parent != nil {
+                    let targetPos = scene.visualCenter(of: selected)
+                    targetDir = SCNVector3(
+                        targetPos.x - cueBallPos.x, 0, targetPos.z - cueBallPos.z
+                    ).normalized()
+                }
+                scene.beginReturnToAim(
+                    cueBallPosition: cueBallPos,
+                    targetDirection: targetDir
+                )
+            } else if isTopDownView {
+                enterTopDownState(animated: true)
+                scene.cameraStateMachine.forceState(.aiming)
+            }
+        default:
+            break
+        }
+    }
+
+    /// 白球当前位置的便利属性
+    private var cueBallPosition: SCNVector3 {
+        guard let cueBall = scene.cueBallNode else { return SCNVector3Zero }
+        return scene.visualCenter(of: cueBall)
     }
     
     deinit {
@@ -441,8 +671,8 @@ class BilliardSceneViewModel: ObservableObject {
     
     // MARK: - Game Setup
     
-    /// 设置训练场景
-    func setupTrainingScene(type: TrainingType) {
+    /// 设置训练场景；ballPositions 非空时仅显示并定位这些球（来自 USDZ），其余目标球隐藏
+    func setupTrainingScene(type: TrainingType, ballPositions: [BallPosition]? = nil) {
         print("[BilliardSceneViewModel] 🎱 setupTrainingScene 开始 type=\(type)")
         // 清除事件
         shotEvents.removeAll()
@@ -450,29 +680,25 @@ class BilliardSceneViewModel: ObservableObject {
         
         // 重置球位置（球来自 USDZ 模型，resetScene 恢复初始位置）
         scene.resetScene()
+        // 若配置指定了球布局（如一星瞄准 2 球），则应用并隐藏未用球
+        if let positions = ballPositions, !positions.isEmpty {
+            scene.applyBallLayout(positions)
+        }
         
         // 球已在模型中就位，无需程序化创建
         
-        // 重置瞄准方向
-        aimDirection = SCNVector3(1, 0, 0)
-        pitchAngle = FirstPersonCamera.defaultPitch
+        aimDirection = SCNVector3(-1, 0, 0)
+        pitchAngle = CameraRigConfig.aimPitchRad
         currentPower = 0
-        
+
         // 设置球杆
         setupCueStick()
         
         // 切换到第一人称视角
         if !isTopDownView {
-            scene.setCameraMode(.firstPerson, animated: false)
-            // 立即更新相机到正确位置（不使用平滑插值）
-            if let cueBall = scene.cueBallNode {
-                scene.updateFirstPersonCamera(
-                    cueBallPosition: cueBall.position,
-                    aimDirection: aimDirection,
-                    pitchAngle: pitchAngle,
-                    smooth: false
-                )
-            }
+            transitionToAimState(animated: false)
+        } else {
+            enterTopDownState(animated: false)
         }
         
         gameState = .aiming
@@ -480,7 +706,7 @@ class BilliardSceneViewModel: ObservableObject {
     }
     
     /// 初始化球杆
-    private func setupCueStick() {
+    func setupCueStick() {
         // 移除旧球杆
         cueStick?.rootNode.removeFromParentNode()
         
@@ -496,8 +722,9 @@ class BilliardSceneViewModel: ObservableObject {
         
         // 更新球杆位置
         if let cueBall = scene.cueBallNode {
+            let cueCenter = scene.visualCenter(of: cueBall)
             cueStick?.update(
-                cueBallPosition: cueBall.position,
+                cueBallPosition: cueCenter,
                 aimDirection: aimDirection,
                 pullBack: 0
             )
@@ -521,6 +748,17 @@ class BilliardSceneViewModel: ObservableObject {
     
     // MARK: - Ball Name Helpers
     
+    /// 从 hit test 命中的子节点向上查找球根节点（母球或目标球）
+    func findBallAncestor(_ node: SCNNode) -> SCNNode? {
+        var current: SCNNode? = node
+        while let n = current {
+            if n.name == "cueBall" { return n }
+            if let name = n.name, isTargetBallName(name) { return n }
+            current = n.parent
+        }
+        return nil
+    }
+
     /// 判断节点名是否为目标球（非母球）
     /// 兼容程序化球 "ball_N" 和 USDZ 模型球 "_N"
     func isTargetBallName(_ name: String) -> Bool {
@@ -536,6 +774,7 @@ class BilliardSceneViewModel: ObservableObject {
     func prepareNextShot() {
         shotEvents.removeAll()
         currentPower = 0
+        selectedCuePoint = CGPoint(x: 0.5, y: 0.5)
         
         scene.hideAimLine()
         scene.hideGhostBall()
@@ -543,32 +782,24 @@ class BilliardSceneViewModel: ObservableObject {
         
         // 检查母球是否在场
         if scene.cueBallNode == nil || scene.cueBallNode?.parent == nil {
-            // 母球落袋 -> 重新创建母球，进入摆放状态
-            scene.createCueBall()
+            scene.restoreCueBall()
             gameState = .placing
         } else {
-            // 正常 -> 直接进入瞄准状态
             gameState = .aiming
         }
         
-        // 重置瞄准方向
-        aimDirection = SCNVector3(1, 0, 0)
-        pitchAngle = FirstPersonCamera.defaultPitch
+        pitchAngle = scene.cameraNode.eulerAngles.x
+
+        let camState = scene.cameraStateMachine.currentState
+        if camState == .observing || camState == .returnToAim {
+            return
+        }
         
-        // 恢复球杆
         setupCueStick()
-        
-        // 恢复相机
         if !isTopDownView {
-            scene.setCameraMode(.firstPerson, animated: true)
-            if let cueBall = scene.cueBallNode {
-                scene.updateFirstPersonCamera(
-                    cueBallPosition: cueBall.position,
-                    aimDirection: aimDirection,
-                    pitchAngle: pitchAngle,
-                    smooth: false
-                )
-            }
+            transitionToAimState(animated: true)
+        } else {
+            enterTopDownState(animated: true)
         }
     }
     
@@ -586,15 +817,30 @@ class BilliardSceneViewModel: ObservableObject {
         // 更新轨迹预测
         updateTrajectoryPreview()
     }
-    
+
     /// 更新瞄准轨迹预测（几何计算，不使用物理引擎）
-    func updateTrajectoryPreview() {
+    func updateTrajectoryPreview(minInterval: CFTimeInterval = 1.0 / 30.0, force: Bool = false) {
         guard gameState == .aiming, let cueBall = scene.cueBallNode else {
             scene.hidePredictedTrajectory()
+            lastTrajectoryCueBallPos = nil
+            lastTrajectoryAimDirection = nil
             return
         }
         
-        let cueBallPos = cueBall.position
+        let cueBallPos = scene.visualCenter(of: cueBall)
+        let now = CACurrentMediaTime()
+        if !force {
+            let elapsed = now - lastTrajectoryPreviewTimestamp
+            let cueDelta = lastTrajectoryCueBallPos.map { (cueBallPos - $0).length() } ?? .greatestFiniteMagnitude
+            let aimDelta = lastTrajectoryAimDirection.map { (aimDirection - $0).length() } ?? .greatestFiniteMagnitude
+            if elapsed < minInterval, cueDelta < 0.002, aimDelta < 0.002 {
+                return
+            }
+        }
+        lastTrajectoryPreviewTimestamp = now
+        lastTrajectoryCueBallPos = cueBallPos
+        lastTrajectoryAimDirection = aimDirection
+
         let R = BallPhysics.radius
         let surfaceY = cueBallPos.y
         
@@ -604,14 +850,15 @@ class BilliardSceneViewModel: ObservableObject {
         
         for ball in scene.targetBallNodes {
             guard ball.parent != nil else { continue }
-            let toBall = ball.position - cueBallPos
+            let ballPos = scene.visualCenter(of: ball)
+            let toBall = ballPos - cueBallPos
             // 投影到瞄准方向
             let projection = toBall.dot(aimDirection)
             guard projection > 0 else { continue }  // 球在母球前方
             
             // 最近点距离
             let closest = cueBallPos + aimDirection * projection
-            let perpDist = (ball.position - closest).length()
+            let perpDist = (ballPos - closest).length()
             
             // 碰撞条件：垂直距离 < 2R
             if perpDist < R * 2 {
@@ -638,7 +885,7 @@ class BilliardSceneViewModel: ObservableObject {
         )
         
         // 3. 计算碰后目标球方向（沿碰撞法线方向）
-        let targetPos = targetBall.position
+        let targetPos = scene.visualCenter(of: targetBall)
         let collisionNormal = (targetPos - collisionCueBallPos).normalized()
         let targetBallEndPos = SCNVector3(
             targetPos.x + collisionNormal.x * 0.6,
@@ -675,38 +922,45 @@ class BilliardSceneViewModel: ObservableObject {
     
     // MARK: - Stroke
     
-    /// 开始蓄力
-    func startCharging() {
-        guard gameState == .aiming else { return }
-        gameState = .charging
-        currentPower = 0
+    /// 使用当前滑条力度执行击球
+    func executeStrokeFromSlider() {
+        executeStroke(power: currentPower)
     }
     
     /// 执行击球 — 使用 EventDrivenEngine 计算轨迹并用 SCNAction 回放
     func executeStroke(power: Float) {
-        guard gameState == .charging, let cueBall = scene.cueBallNode else { return }
+        guard gameState == .aiming, let cueBall = scene.cueBallNode else { return }
+        
+        let velocity = StrokePhysics.velocity(forPower: power)
+        guard velocity > 0 else { return }
         
         shotEvents.removeAll()
         currentShotTime = 0
         
-        // 1. 计算击球参数
-        let velocity = StrokePhysics.minVelocity +
-            (StrokePhysics.maxVelocity - StrokePhysics.minVelocity) * power
+        let normalizedPower = min(max(power, 0), 100) / 100.0
+        let strike = computeCueStrike(velocity: velocity, power: normalizedPower)
+        let aimUnit = aimDirection.normalized()
+        let velUnit = strike.linearVelocity.normalized()
+        let alignmentDot = aimUnit.dot(velUnit)
+        print("[StrokeDebug] aimUnit=\(aimUnit), velUnit=\(velUnit), alignmentDot=\(alignmentDot)")
         
-        let strike = computeCueStrike(velocity: velocity, power: power)
-        
-        // 2. 隐藏瞄准线、轨迹预测和球杆
+        // 2. 隐藏瞄准线、轨迹预测；播放球杆前冲击球动画
         scene.hideAimLine()
         scene.hidePredictedTrajectory()
         scene.hideGhostBall()
-        cueStick?.hide()
+        cueStick?.animateStroke(
+            cueBallPosition: scene.visualCenter(of: cueBall),
+            aimDirection: aimDirection
+        ) {}
+        clearNextTargetSelection()
         
         // 3. 创建 EventDrivenEngine 并收集所有球状态
         let engine = EventDrivenEngine(tableGeometry: scene.tableGeometry)
         
         // 母球 — 设置击球后的速度/角速度
+        let cueCenter = scene.visualCenter(of: cueBall)
         let cueBallState = BallState(
-            position: cueBall.presentation.position,
+            position: cueCenter,
             velocity: strike.linearVelocity,
             angularVelocity: SCNVector3(strike.angularVelocity.x, strike.angularVelocity.y, strike.angularVelocity.z),
             state: .sliding,
@@ -715,19 +969,39 @@ class BilliardSceneViewModel: ObservableObject {
         engine.setBall(cueBallState)
         
         // 目标球
+        var sampledTargetCenters: [SCNVector3] = []
+        var targetCount = 0
         for ballNode in scene.targetBallNodes {
+            let center = scene.visualCenter(of: ballNode)
             let state = BallState(
-                position: ballNode.presentation.position,
+                position: center,
                 velocity: SCNVector3Zero,
                 angularVelocity: SCNVector3Zero,
                 state: .stationary,
                 name: ballNode.name ?? "ball"
             )
             engine.setBall(state)
+            targetCount += 1
+            if sampledTargetCenters.count < 3 { sampledTargetCenters.append(center) }
         }
         
+        if let nearest = scene.targetBallNodes
+            .map({ scene.visualCenter(of: $0) })
+            .min(by: { ($0 - cueCenter).length() < ($1 - cueCenter).length() }) {
+            let d = (nearest - cueCenter).length()
+            print("[StrokeDebug] cueCenter=\(cueCenter), nearestTargetDistance=\(d), targetCount=\(targetCount)")
+        } else {
+            print("[StrokeDebug] cueCenter=\(cueCenter), targetCount=0")
+        }
+        print("[StrokeDebug] sampledTargets=\(sampledTargetCenters)")
+        
         // 4. 运行模拟
-        engine.simulate(maxTime: 15.0)
+        engine.simulate(maxEvents: 500, maxTime: 15.0)
+        let firstBallBall = engine.resolvedEvents.first {
+            if case .ballBall = $0 { return true }
+            return false
+        }
+        print("[StrokeDebug] resolvedEvents=\(engine.resolvedEvents.count), firstBallBall=\(String(describing: firstBallBall))")
         
         // 5. 提取事件记录供规则判定
         extractGameEvents(from: engine)
@@ -736,16 +1010,20 @@ class BilliardSceneViewModel: ObservableObject {
         let recorder = engine.getTrajectoryRecorder()
         lastShotRecorder = recorder
         
-        // 7. 更新状态
+        // 7. 通知状态机：击球
+        scene.cameraStateMachine.saveAimContext(aimDirection: aimDirection, zoom: scene.currentCameraZoom)
+        scene.cameraStateMachine.handleEvent(.shotFired)
+
         gameState = .ballsMoving
+        saveAimCameraMemory()
+
+        // 8. 启动 CADisplayLink 驱动的轨迹回放
+        startTrajectoryPlayback(recorder: recorder)
         
-        // 8. 用 SCNAction 回放所有球的轨迹
-        playTrajectories(recorder: recorder)
-        
-        // 9. 击球后切换到观察视角
-        if !isTopDownView {
-            scene.setCameraPostShot(cueBallPosition: cueBall.position)
-        }
+        // 9. 延迟观察视角：等白球击中目标球后再切换
+        hasTriggeredObservation = false
+        pendingObservationContactTime = engine.firstBallBallCollisionTime
+        pendingObservationContext = (cueBallPosition: cueCenter, aimDirection: aimDirection)
         
         // 10. 播放击球音效
         playStrokeSound(power: power)
@@ -771,64 +1049,101 @@ class BilliardSceneViewModel: ObservableObject {
         }
     }
     
-    /// 使用 SCNAction 播放模拟轨迹
-    private func playTrajectories(recorder: TrajectoryRecorder) {
-        // 收集需要播放的球节点
-        var ballNodes: [SCNNode] = []
-        if let cueBall = scene.cueBallNode {
-            ballNodes.append(cueBall)
-        }
-        ballNodes.append(contentsOf: scene.targetBallNodes)
-        
-        // 台面 Y 坐标（球心高度）
+    /// 启动 CADisplayLink 驱动的轨迹回放
+    private func startTrajectoryPlayback(recorder: TrajectoryRecorder) {
         let surfaceY = TablePhysics.height + BallPhysics.radius
-        
-        playbackRemainingCount = 0
-        
-        for ballNode in ballNodes {
-            guard let name = ballNode.name else { continue }
-            guard let action = recorder.action(for: ballNode, ballName: name, speed: 1.0, surfaceY: surfaceY) else { continue }
-            
-            playbackRemainingCount += 1
-            ballNode.removeAllActions()
-            
-            // 检查该球是否会进袋（进袋球的 SCNAction 已包含 fadeOut + removeFromParentNode）
-            let willBePocketed = recorder.isBallPocketed(name)
-            
-            // 播放轨迹 + 完成回调
-            let sequence = SCNAction.sequence([
-                action,
-                SCNAction.run { [weak self] _ in
-                    DispatchQueue.main.async {
-                        if willBePocketed {
-                            // 进袋球：隐藏影子，从 targetBallNodes 中清理
-                            self?.scene.hideShadow(for: name)
-                            self?.scene.removeTargetBall(named: name)
-                            // 如果是母球进袋，清空母球引用
-                            if name == "cueBall" {
-                                self?.scene.clearCueBallReference()
-                            }
-                        } else {
-                            // 非进袋球：确保 Y 坐标正确
-                            ballNode.position.y = surfaceY
-                        }
-                        self?.onBallPlaybackFinished()
-                    }
-                }
-            ])
-            ballNode.runAction(sequence)
-        }
-        
-        // 如果没有球需要播放（理论上不会发生），直接结束
-        if playbackRemainingCount == 0 {
-            onBallsAtRest()
-        }
+        trajectoryPlayback = TrajectoryPlayback(recorder: recorder, surfaceY: surfaceY)
+        playbackStartTime = 0
     }
     
-    /// 单个球的轨迹播放完成
-    private func onBallPlaybackFinished() {
-        playbackRemainingCount -= 1
-        if playbackRemainingCount <= 0 {
+    /// 每帧由 CADisplayLink 调用：驱动轨迹回放，设置球节点位置/旋转
+    func updateTrajectoryPlaybackFrame(timestamp: CFTimeInterval) {
+        guard let playback = trajectoryPlayback else { return }
+        guard gameState == .ballsMoving else { return }
+        
+        if playbackStartTime == 0 {
+            playbackStartTime = timestamp
+        }
+        
+        let elapsed = Float(timestamp - playbackStartTime)
+        let surfaceY = TablePhysics.height + BallPhysics.radius
+
+        // 延迟观察视角：白球击中目标球后再切换
+        if !hasTriggeredObservation, !isTopDownView,
+           let ctx = pendingObservationContext {
+            let triggerTime = pendingObservationContactTime ?? observationFallbackDelay
+            if elapsed >= triggerTime {
+                hasTriggeredObservation = true
+                scene.cameraStateMachine.handleEvent(.ballsStartedMoving)
+                scene.setCameraPostShot(cueBallPosition: ctx.cueBallPosition, aimDirection: ctx.aimDirection)
+            }
+        }
+
+        var allBallNodes: [SCNNode] = []
+        if let cueBall = scene.cueBallNode {
+            allBallNodes.append(cueBall)
+        }
+        allBallNodes.append(contentsOf: scene.targetBallNodes)
+        
+        for ballNode in allBallNodes {
+            guard let name = ballNode.name else { continue }
+            guard let state = playback.stateAt(ballName: name, time: elapsed) else { continue }
+            
+            ballNode.position = state.position
+            
+            // 视觉旋转：根据累积滚动弧度和运动方向旋转球体
+            if state.accumulatedRotation > 0.001, state.moveDirection.length() > 0.001 {
+                let axis = SCNVector3(0, 1, 0).cross(state.moveDirection).normalized()
+                if axis.length() > 0.001 {
+                    ballNode.rotation = SCNVector4(
+                        axis.x, axis.y, axis.z,
+                        state.accumulatedRotation
+                    )
+                }
+            }
+            
+            // 进袋处理
+            if state.motionState == .pocketed && !playback.pocketedBalls.contains(name) {
+                playback.markPocketed(name, at: elapsed)
+            }
+            
+            // 淡出效果
+            let opacity = playback.opacity(for: name, at: elapsed)
+            if opacity < 1.0 {
+                ballNode.opacity = CGFloat(opacity)
+                if opacity <= 0 {
+                    scene.hideShadow(for: name)
+                    scene.removeTargetBall(named: name)
+                    if name == "cueBall" {
+                        scene.clearCueBallReference()
+                    }
+                    ballNode.removeFromParentNode()
+                }
+            }
+        }
+        
+        // 回放完成
+        if playback.isComplete(at: elapsed) {
+            // 确保最终位置精确
+            for ballNode in allBallNodes {
+                guard let name = ballNode.name else { continue }
+                if !playback.pocketedBalls.contains(name) {
+                    ballNode.position.y = surfaceY
+                }
+            }
+
+            // 安全兜底：回放结束但观察视角尚未触发时，立即推入 observing
+            if !hasTriggeredObservation {
+                hasTriggeredObservation = true
+                if let ctx = pendingObservationContext, !isTopDownView {
+                    scene.cameraStateMachine.handleEvent(.ballsStartedMoving)
+                    scene.setCameraPostShot(cueBallPosition: ctx.cueBallPosition, aimDirection: ctx.aimDirection)
+                }
+            }
+
+            trajectoryPlayback = nil
+            playbackStartTime = 0
+            pendingObservationContext = nil
             onBallsAtRest()
         }
     }
@@ -873,32 +1188,17 @@ class BilliardSceneViewModel: ObservableObject {
     
     /// 切换到下一个相机视角
     func cycleNextCameraMode() {
-        let modes: [BilliardScene.CameraMode] = [.firstPerson, .topDown2D, .perspective3D, .free]
-        
-        if let currentIndex = modes.firstIndex(of: scene.currentCameraMode) {
-            let nextIndex = (currentIndex + 1) % modes.count
-            scene.setCameraMode(modes[nextIndex])
-            isTopDownView = modes[nextIndex] == .topDown2D
-        }
+        toggleViewMode()
     }
     
     /// 2D/3D 视角切换
     func toggleViewMode() {
-        isTopDownView.toggle()
-        if isTopDownView {
-            scene.setCameraMode(.topDown2D, animated: true)
+        let shouldEnterTopDown = scene.currentCameraMode != .topDown2D
+        if shouldEnterTopDown {
+            enterTopDownState(animated: true)
             cueStick?.hide()
         } else {
-            scene.setCameraMode(.firstPerson, animated: true)
-            // 立即将相机定位到正确位置
-            if let cueBall = scene.cueBallNode {
-                scene.updateFirstPersonCamera(
-                    cueBallPosition: cueBall.position,
-                    aimDirection: aimDirection,
-                    pitchAngle: pitchAngle,
-                    smooth: false
-                )
-            }
+            transitionToAimState(animated: true)
             if gameState == .aiming {
                 cueStick?.show()
             }
@@ -909,22 +1209,25 @@ class BilliardSceneViewModel: ObservableObject {
     
     /// 处理点击事件
     func handleTap(on node: SCNNode, at localCoordinates: SCNVector3) {
-        if node.name == "cueBall" && gameState == .idle {
-            // 点击母球，进入瞄准模式
+        let camState = scene.cameraStateMachine.currentState
+
+        if let name = node.name, isTargetBallName(name), camState == .observing {
+            selectNextTargetAndReturn(node)
+        } else if node.name == "cueBall" && gameState == .idle {
             gameState = .aiming
             cueStick?.show()
             if !isTopDownView {
-                scene.setCameraMode(.firstPerson, animated: true)
+                transitionToAimState(animated: true)
             }
-        } else if let name = node.name, isTargetBallName(name), gameState == .aiming {
+        } else if let name = node.name, isTargetBallName(name), gameState == .aiming, camState == .aiming {
             guard let cueBall = scene.cueBallNode else { return }
-            let target = node.position
+            let target = scene.visualCenter(of: node)
             let pockets = scene.pockets()
             let otherBalls = scene.targetBallNodes
                 .filter { $0 !== node }
-                .map { $0.position }
+                .map { scene.visualCenter(of: $0) }
             let candidates = AimingCalculator.viablePockets(
-                cueBall: cueBall.position,
+                cueBall: scene.visualCenter(of: cueBall),
                 objectBall: target,
                 pockets: pockets,
                 otherBalls: otherBalls
@@ -932,11 +1235,30 @@ class BilliardSceneViewModel: ObservableObject {
             if let bestPocket = AimingCalculator.pickEasiestPot(candidates) {
                 let ghost = AimingCalculator.ghostBallCenter(objectBall: target, pocket: bestPocket.center)
                 scene.showGhostBall(at: ghost)
-                aimDirection = (ghost - cueBall.position).normalized()
+                aimDirection = (ghost - scene.visualCenter(of: cueBall)).normalized()
+                scene.setAimDirectionForCamera(aimDirection)
             } else {
                 scene.hideGhostBall()
             }
         }
+    }
+
+    /// 观察视角中选择下一颗目标球，并触发回归瞄准
+    private func selectNextTargetAndReturn(_ node: SCNNode) {
+        if let prev = selectedNextTarget {
+            scene.removeSelectionHighlight(from: prev)
+        }
+        selectedNextTarget = node
+        scene.addSelectionHighlight(to: node)
+        scene.cameraStateMachine.handleEvent(.targetSelected)
+    }
+
+    /// 清除目标球选择
+    private func clearNextTargetSelection() {
+        if let prev = selectedNextTarget {
+            scene.removeSelectionHighlight(from: prev)
+        }
+        selectedNextTarget = nil
     }
     
     /// 确认母球放置
@@ -945,8 +1267,70 @@ class BilliardSceneViewModel: ObservableObject {
         gameState = .aiming
         cueStick?.show()
         if !isTopDownView {
-            scene.setCameraMode(.firstPerson, animated: true)
+            transitionToAimState(animated: true)
         }
+    }
+    
+    /// Enter placing mode with optional head-string restriction
+    func enterPlacingMode(behindHeadString: Bool = false) {
+        shotEvents.removeAll()
+        currentPower = 0
+        selectedCuePoint = CGPoint(x: 0.5, y: 0.5)
+        scene.hideAimLine()
+        scene.hideGhostBall()
+        scene.hidePredictedTrajectory()
+        cueStick?.hide()
+        
+        placingBehindHeadString = behindHeadString
+        
+        if scene.cueBallNode == nil || scene.cueBallNode?.parent == nil {
+            scene.restoreCueBall()
+        }
+        
+        // 开球/自由球摆放后，默认朝向球堆方向（-X），保持横屏下的击球方向一致
+        aimDirection = SCNVector3(-1, 0, 0)
+        pitchAngle = scene.cameraNode.eulerAngles.x
+        gameState = .placing
+        
+        if scene.currentCameraMode == .topDown2D {
+            enterTopDownState(animated: false)
+        } else {
+            transitionToAimState(animated: true)
+        }
+    }
+    
+    private func saveAimCameraMemory() {
+        scene.saveCurrentAimZoom()
+    }
+    
+    private func transitionToAimState(animated: Bool) {
+        saveAimCameraMemory()
+        scene.returnCameraToAim(animated: animated)
+        scene.setAimDirectionForCamera(aimDirection)
+        scene.cameraStateMachine.forceState(.aiming)
+    }
+
+    private func enterTopDownState(animated: Bool) {
+        scene.setCameraMode(.topDown2D, animated: animated)
+        scene.hideAimLine()
+        scene.hidePredictedTrajectory()
+        isTopDownView = true
+    }
+    
+    func quickResetPlanningCamera() {
+        toggleViewMode()
+    }
+    
+    func applyCameraPreset(_ preset: String) {
+        // CameraRig 版本不再支持轨道预设，保留空实现以兼容现有调用方。
+    }
+    
+    func saveCameraPreset(slot: Int) {
+        _ = slot
+    }
+    
+    func loadCameraPreset(slot: Int) {
+        _ = slot
     }
     
     /// 记录事件

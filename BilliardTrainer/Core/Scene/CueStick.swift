@@ -38,6 +38,9 @@ class CueStick {
     /// 当前后拉距离
     private var currentPullBack: Float = 0
     
+    /// USDZ 球杆皮头在模型局部坐标的点位（用于三维对齐白球中心）
+    private var modelTipLocalPoint: SCNVector3 = SCNVector3Zero
+    
     // MARK: - Initialization
     
     /// 使用 USDZ 模型球杆初始化
@@ -57,9 +60,17 @@ class CueStick {
         let sizeX = bMax.x - bMin.x
         let sizeY = bMax.y - bMin.y
         let sizeZ = bMax.z - bMin.z
+        // 与程序化球杆一致：+Z 是杆尾方向，皮头取较小 Z 端；
+        // X/Y 用包围盒中心，确保皮头在三维空间对齐白球中心
+        modelTipLocalPoint = SCNVector3(
+            (bMin.x + bMax.x) * 0.5,
+            (bMin.y + bMax.y) * 0.5,
+            bMin.z
+        )
         print("[CueStick] 使用 USDZ 模型球杆")
         print("[CueStick]   boundingBox: min=\(bMin), max=\(bMax)")
         print("[CueStick]   size: X=\(sizeX), Y=\(sizeY), Z=\(sizeZ)")
+        print("[CueStick]   tipLocalPoint=\(modelTipLocalPoint)")
         print("[CueStick]   modelNode scale=\(modelCueStickNode.scale)")
     }
     
@@ -139,50 +150,61 @@ class CueStick {
     ///   - cueBallPosition: 母球位置
     ///   - aimDirection: 瞄准方向（归一化，XZ 平面）
     ///   - pullBack: 后拉距离 (0 ~ maxPullBack)
-    func update(cueBallPosition: SCNVector3, aimDirection: SCNVector3, pullBack: Float) {
+    ///   - elevation: 仰角（弧度，正值 = 杆尾抬高）
+    func update(cueBallPosition: SCNVector3, aimDirection: SCNVector3, pullBack: Float, elevation: Float = 0) {
         currentPullBack = pullBack
         
         if usesModelCueStick {
-            updateModelCueStick(cueBallPosition: cueBallPosition, aimDirection: aimDirection, pullBack: pullBack)
+            updateModelCueStick(cueBallPosition: cueBallPosition, aimDirection: aimDirection, pullBack: pullBack, elevation: elevation)
         } else {
-            updateProgrammaticCueStick(cueBallPosition: cueBallPosition, aimDirection: aimDirection, pullBack: pullBack)
+            updateProgrammaticCueStick(cueBallPosition: cueBallPosition, aimDirection: aimDirection, pullBack: pullBack, elevation: elevation)
         }
+    }
+    
+    /// 将任意瞄准向量约束到台面 XZ 平面并归一化
+    private func normalizedTableAim(_ aimDirection: SCNVector3) -> SCNVector3 {
+        let flat = SCNVector3(aimDirection.x, 0, aimDirection.z)
+        let len = flat.length()
+        if len < 0.0001 {
+            return SCNVector3(1, 0, 0)
+        }
+        return flat / len
     }
     
     /// 更新 USDZ 模型球杆的位置
-    private func updateModelCueStick(cueBallPosition: SCNVector3, aimDirection: SCNVector3, pullBack: Float) {
+    private func updateModelCueStick(cueBallPosition: SCNVector3, aimDirection: SCNVector3, pullBack: Float, elevation: Float) {
         let tipOffset = CueStickSettings.tipOffset + pullBack
+        let aim = normalizedTableAim(aimDirection)
         
-        // 球杆根节点位于母球中心
         rootNode.position = cueBallPosition
         
-        // 计算球杆朝向（球杆从母球向后延伸）
-        let backDirection = SCNVector3(0, 0, 0) - aimDirection
+        let backDirection = -aim
         let yaw = atan2(backDirection.x, backDirection.z)
-        rootNode.eulerAngles = SCNVector3(0, yaw, 0)
+        // elevation 使杆尾抬高：负 pitch 使 +Z（杆尾）方向朝上
+        rootNode.eulerAngles = SCNVector3(-elevation, yaw, 0)
         
-        // 模型球杆在 rootNode 的局部坐标系中
-        // 模型的旋转/缩放由 container 内的 transform 控制
-        // 位置由 rootNode 控制（rootNode.position = cueBallPosition）
-        // 后拉距离沿 +Z 方向偏移（+Z = 远离击球方向）
         if let model = modelNode {
-            // 保持模型的缩放不变，只调整局部位置（后拉效果）
-            model.position = SCNVector3(0, 0, tipOffset)
+            model.position = SCNVector3(
+                -modelTipLocalPoint.x,
+                -modelTipLocalPoint.y,
+                tipOffset - modelTipLocalPoint.z
+            )
         }
     }
     
-    /// 更新程序化球杆的位置（保持原有逻辑）
-    private func updateProgrammaticCueStick(cueBallPosition: SCNVector3, aimDirection: SCNVector3, pullBack: Float) {
+    /// 更新程序化球杆的位置
+    private func updateProgrammaticCueStick(cueBallPosition: SCNVector3, aimDirection: SCNVector3, pullBack: Float, elevation: Float) {
         let tipOffset = CueStickSettings.tipOffset + pullBack
         let shaftLength = CueStickSettings.length
         let tipHeight = CueStickSettings.tipHeight
         let ferruleHeight: Float = 0.015
+        let aim = normalizedTableAim(aimDirection)
         
         rootNode.position = cueBallPosition
         
-        let backDirection = SCNVector3(0, 0, 0) - aimDirection
+        let backDirection = -aim
         let yaw = atan2(backDirection.x, backDirection.z)
-        rootNode.eulerAngles = SCNVector3(0, yaw, 0)
+        rootNode.eulerAngles = SCNVector3(-elevation, yaw, 0)
         
         tipNode?.position = SCNVector3(0, 0, tipOffset + tipHeight / 2)
         tipNode?.eulerAngles = SCNVector3(Float.pi / 2, 0, 0)
@@ -192,6 +214,108 @@ class CueStick {
         
         shaftNode?.position = SCNVector3(0, 0, tipOffset + tipHeight + ferruleHeight + shaftLength / 2)
         shaftNode?.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
+    }
+    
+    // MARK: - Collision Detection
+    
+    /// 计算球杆避免碰撞所需的最小仰角
+    /// 在瞄准方向的垂直平面中，检测球杆是否会碰到其他球或库边，
+    /// 若有碰撞则返回使杆身完全避开障碍物的最小仰角。
+    /// - Parameters:
+    ///   - cueBallPosition: 母球中心位置
+    ///   - aimDirection: 瞄准方向（XZ 平面）
+    ///   - pullBack: 当前后拉距离
+    ///   - ballPositions: 所有目标球的世界坐标
+    /// - Returns: 所需仰角（弧度），0 表示无碰撞
+    static func calculateRequiredElevation(
+        cueBallPosition: SCNVector3,
+        aimDirection: SCNVector3,
+        pullBack: Float,
+        ballPositions: [SCNVector3]
+    ) -> Float {
+        let aim = SCNVector3(aimDirection.x, 0, aimDirection.z).normalized()
+        guard aim.length() > 0.0001 else { return 0 }
+        let backDir = -aim
+        
+        let totalTipOffset = CueStickSettings.tipOffset + pullBack
+        let stickLength = CueStickSettings.length
+        let tipR = CueStickSettings.tipRadius
+        let buttR = CueStickSettings.buttRadius
+        let ballR = BallPhysics.radius
+        let clearance: Float = 0.003
+        
+        let tipWorldY = cueBallPosition.y
+        let tipWorldXZ = SCNVector3(
+            cueBallPosition.x + backDir.x * totalTipOffset,
+            0,
+            cueBallPosition.z + backDir.z * totalTipOffset
+        )
+        
+        var maxElevation: Float = 0
+        
+        // --- 检测目标球 ---
+        for ballPos in ballPositions {
+            let dx = ballPos.x - tipWorldXZ.x
+            let dz = ballPos.z - tipWorldXZ.z
+            
+            let dAlong = dx * backDir.x + dz * backDir.z
+            if dAlong < 0 || dAlong > stickLength { continue }
+            
+            let perpX = dx - backDir.x * dAlong
+            let perpZ = dz - backDir.z * dAlong
+            let dPerp = sqrtf(perpX * perpX + perpZ * perpZ)
+            
+            let stickR = tipR + (buttR - tipR) * (dAlong / stickLength)
+            let collisionDist = ballR + stickR + clearance
+            if dPerp >= collisionDist { continue }
+            
+            let rCross = sqrtf(max(0, ballR * ballR - min(ballR * ballR, dPerp * dPerp)))
+            let ballTop = ballPos.y + rCross
+            let requiredHeight = ballTop + stickR + clearance - tipWorldY
+            
+            if requiredHeight > 0 && dAlong > 0.001 {
+                let sinTheta = min(1.0, requiredHeight / dAlong)
+                let theta = asinf(sinTheta)
+                maxElevation = max(maxElevation, theta)
+            }
+        }
+        
+        // --- 检测库边 ---
+        let cushionTop = TablePhysics.height + TablePhysics.cushionHeight
+        let heightAboveCushion = cushionTop - tipWorldY
+        if heightAboveCushion > 0 {
+            let halfL = TablePhysics.innerLength / 2
+            let halfW = TablePhysics.innerWidth / 2
+            
+            let rails: [(normal: (Float, Float), offset: Float)] = [
+                ((1, 0), halfL),    // +X rail
+                ((-1, 0), halfL),   // -X rail
+                ((0, 1), halfW),    // +Z rail
+                ((0, -1), halfW),   // -Z rail
+            ]
+            
+            for rail in rails {
+                let nx = rail.normal.0
+                let nz = rail.normal.1
+                let denominator = backDir.x * nx + backDir.z * nz
+                guard denominator > 0.001 else { continue }
+                let tipDot = tipWorldXZ.x * nx + tipWorldXZ.z * nz
+                let dCrossing = (rail.offset - tipDot) / denominator
+                
+                if dCrossing > 0 && dCrossing < stickLength {
+                    let stickR = tipR + (buttR - tipR) * (dCrossing / stickLength)
+                    let required = heightAboveCushion + stickR + clearance
+                    if required > 0 && dCrossing > 0.001 {
+                        let sinTheta = min(1.0, required / dCrossing)
+                        let theta = asinf(sinTheta)
+                        maxElevation = max(maxElevation, theta)
+                    }
+                }
+            }
+        }
+        
+        let maxAllowedElevation: Float = 30 * .pi / 180
+        return min(maxElevation, maxAllowedElevation)
     }
     
     // MARK: - Animation

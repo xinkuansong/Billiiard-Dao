@@ -1,0 +1,45 @@
+{
+  "metadata": {
+    "id": "s3-draw-shot",
+    "engine": "pooltool-fallback"
+  },
+  "events": [],
+  "finalState": {
+    "cueBall": {
+      "position": [
+        0.0,
+        0.828575,
+        0.4
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        -3.0
+      ],
+      "angularVelocity": [
+        0.0,
+        -80.0,
+        0.0
+      ],
+      "motionState": "sliding"
+    },
+    "ball_1": {
+      "position": [
+        0.0,
+        0.828575,
+        0.0
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "stationary"
+    }
+  }
+}

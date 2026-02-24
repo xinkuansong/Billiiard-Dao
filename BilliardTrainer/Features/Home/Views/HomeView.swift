@@ -72,6 +72,8 @@ struct UserInfoCard: View {
 
 // MARK: - Quick Access Section
 struct QuickAccessSection: View {
+    @State private var showFreePlay = false
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("快捷入口")
@@ -91,6 +93,33 @@ struct QuickAccessSection: View {
                     icon: "target",
                     color: .orange
                 )
+                
+                Button {
+                    showFreePlay = true
+                } label: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Image(systemName: "sportscourt.fill")
+                            .font(.title2)
+                            .foregroundColor(.blue)
+                        
+                        Text("自由练习")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        Text("中式八球")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                    .background(Color(.systemBackground))
+                    .cornerRadius(12)
+                    .shadow(color: .black.opacity(0.05), radius: 5)
+                }
+                .buttonStyle(.plain)
+                .fullScreenCover(isPresented: $showFreePlay) {
+                    FreePlayView()
+                }
             }
         }
     }

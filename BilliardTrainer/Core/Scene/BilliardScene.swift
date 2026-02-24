@@ -7,6 +7,7 @@
 
 import SceneKit
 import SwiftUI
+import UIKit
 
 // MARK: - Billiard Scene
 /// 台球场景管理器
@@ -29,9 +30,30 @@ class BilliardScene: SCNScene {
     /// 所有球节点的初始位置（用于重置）
     private var initialBallPositions: [String: SCNVector3] = [:]
     
-    /// 第一人称视角缩放因子（影响相机到母球距离）
-    var firstPersonZoomFactor: Float = 1.0
+    /// 从 USDZ 模型得到的初始位置备份（用于恢复“全部球”布局）
+    private var modelInitialBallPositions: [String: SCNVector3] = [:]
     
+    /// CameraRig（核心摄像机驱动）
+    private(set) var cameraRig: CameraRig?
+
+    /// 摄像系统状态机
+    private(set) var cameraStateMachine = CameraStateMachine()
+
+    /// 瞄准控制器
+    private(set) var aimingController: AimingController?
+
+    /// 视角过渡控制器
+    private(set) var viewTransitionController: ViewTransitionController?
+
+    /// 观察视角控制器
+    private(set) var observationController: ObservationController?
+
+    /// 自动对齐控制器
+    private(set) var autoAlignController: AutoAlignController?
+
+    /// 上帧白球 XZ 位置，用于检测白球是否实际移动
+    private var lastTrackedCueBallXZ: SIMD2<Float>?
+
     /// 相机节点
     private(set) var cameraNode: SCNNode!
     
@@ -51,7 +73,19 @@ class BilliardScene: SCNScene {
     private var predictedTrajectoryNodes: [SCNNode] = []
     
     /// 当前视角模式
-    private(set) var currentCameraMode: CameraMode = .firstPerson
+    private(set) var currentCameraMode: CameraMode = .aim {
+        didSet {
+            if currentCameraMode != oldValue {
+                onCameraModeChanged?(currentCameraMode)
+            }
+        }
+    }
+    
+    /// 视角模式变化回调（供 ViewModel 自动同步 UI 状态）
+    var onCameraModeChanged: ((CameraMode) -> Void)?
+    /// 记忆用户在 Aim 态的 zoom（用于 Action -> Aim 回归）
+    private var savedAimZoom: Float = 0
+
     
     /// 球台几何描述
     private(set) var tableGeometry: TableGeometry = .chineseEightBall()
@@ -59,13 +93,14 @@ class BilliardScene: SCNScene {
     /// USDZ 模型提取的球杆节点（供 CueStick 使用）
     private(set) var modelCueStickNode: SCNNode?
     
+    /// 地面节点（3D 视角参考平面，Y = SceneLayout.groundLevelY）
+    private(set) var groundNode: SCNNode?
+    
     // MARK: - Camera Mode
     enum CameraMode: Equatable {
-        case firstPerson    // 第一人称击球视角（默认）
+        case aim            // CameraRig 瞄准态
+        case action         // CameraRig 观察态
         case topDown2D      // 2D俯视
-        case perspective3D  // 3D透视
-        case shooting       // 击球视角
-        case free           // 自由视角
     }
     
     // MARK: - Initialization
@@ -84,20 +119,72 @@ class BilliardScene: SCNScene {
     
     private func setupScene() {
         setupEnvironment()
+        setupGround()
         setupTable()
         setupLights()
         setupCamera()
         setupPhysics()
     }
     
-    /// 设置环境
+    /// 两层地面：Layer 1 unlit 视觉面 + Layer 2 shadow catcher
+    private func setupGround() {
+        let planeSize: CGFloat = 40
+
+        // ── Layer 1: 视觉地面 (unlit, 与背景无缝衔接) ──
+        let visualPlane = SCNPlane(width: planeSize, height: planeSize)
+        let visualMat = SCNMaterial()
+        visualMat.lightingModel = .constant
+        visualMat.diffuse.contents = UIColor(red: 0.032, green: 0.042, blue: 0.062, alpha: 1.0)
+        visualMat.writesToDepthBuffer = true
+        visualMat.readsFromDepthBuffer = true
+        visualMat.isDoubleSided = false
+        visualPlane.materials = [visualMat]
+
+        let visualNode = SCNNode(geometry: visualPlane)
+        visualNode.name = "ground_visual"
+        visualNode.eulerAngles.x = -.pi / 2
+        visualNode.position = SCNVector3(0, SceneLayout.groundLevelY, 0)
+        visualNode.castsShadow = false
+        visualNode.renderingOrder = -10
+        rootNode.addChildNode(visualNode)
+
+        // ── Layer 2: Shadow catcher (只渲染阴影) ──
+        let shadowPlane = SCNPlane(width: planeSize, height: planeSize)
+        let shadowMat = SCNMaterial()
+        shadowMat.lightingModel = .physicallyBased
+        shadowMat.diffuse.contents = UIColor.white
+        shadowMat.roughness.contents = Float(1.0)
+        shadowMat.metalness.contents = Float(0.0)
+        shadowMat.isDoubleSided = false
+        shadowMat.writesToDepthBuffer = false
+        shadowMat.readsFromDepthBuffer = true
+        shadowMat.blendMode = .alpha
+        shadowMat.shaderModifiers = [.fragment: Self.shadowCatcherShader]
+        shadowPlane.materials = [shadowMat]
+
+        let shadowNode = SCNNode(geometry: shadowPlane)
+        shadowNode.name = "ground_shadow"
+        shadowNode.eulerAngles.x = -.pi / 2
+        shadowNode.position = SCNVector3(0, SceneLayout.groundLevelY + 0.0005, 0)
+        shadowNode.castsShadow = false
+        shadowNode.renderingOrder = -9
+        rootNode.addChildNode(shadowNode)
+
+        groundNode = visualNode
+    }
+
+    /// Shadow catcher fragment shader:
+    /// 利用漫反射光照贡献判断阴影区域，仅输出半透明黑色叠加
+    private static let shadowCatcherShader = """
+    float lum = dot(_lightingContribution.diffuse, float3(0.2126, 0.7152, 0.0722));
+    float lit = saturate(lum);
+    float shadowAlpha = (1.0 - lit) * 0.35;
+    _output.color = float4(0.0, 0.0, 0.0, shadowAlpha);
+    """
+    
+    /// 设置环境光照：HDRI 或增强程序化 cube map（按 Tier 自动选择）
     private func setupEnvironment() {
-        // 背景色 - 深色环境
-        background.contents = UIColor(red: 0.1, green: 0.12, blue: 0.15, alpha: 1.0)
-        
-        // 环境光照（降低强度，避免 PBR 材质过亮）
-        lightingEnvironment.contents = UIColor.darkGray
-        lightingEnvironment.intensity = 0.5
+        EnvironmentLightingManager.apply(to: self, tier: RenderQualityManager.shared.currentTier)
     }
     
     /// 设置球台（视觉与物理分离架构）
@@ -149,11 +236,65 @@ class BilliardScene: SCNScene {
         setupDiamonds()
         
         rootNode.addChildNode(tableNode)
-        
-        // 4. 从模型中提取球节点，设置为游戏球（必须在 tableNode 加入 rootNode 之后执行）
+
+        // 4. 调试：打印 USDZ 材质信息（首次运行时查看控制台）
+        MaterialFactory.debugPrintMaterials(in: tableNode)
+
+        // 5. 增强台面 / 木边 / 袋口材质
+        MaterialFactory.enhanceClothMaterials(in: tableNode)
+        MaterialFactory.enhanceRailMaterials(in: tableNode)
+        MaterialFactory.enhancePocketMaterials(in: tableNode)
+
+        // 6. 台面中央微提亮（摄影棚感 radial vignette 反转）
+        addTableCenterGlow()
+
+        // 7. 从模型中提取球节点，设置为游戏球（必须在 tableNode 加入 rootNode 之后执行）
         setupModelBalls()
     }
     
+    /// Subtle center-bright radial overlay on table surface (~+4% center, 0% edges)
+    private func addTableCenterGlow() {
+        let w = CGFloat(TablePhysics.innerLength)
+        let h = CGFloat(TablePhysics.innerWidth)
+        let plane = SCNPlane(width: w, height: h)
+
+        let glowSize: CGFloat = 256
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: glowSize, height: glowSize))
+        let tex = renderer.image { ctx in
+            let center = CGPoint(x: glowSize / 2, y: glowSize / 2)
+            if let grad = CGGradient(
+                colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                colors: [
+                    UIColor(white: 1.0, alpha: 0.04).cgColor,
+                    UIColor(white: 1.0, alpha: 0.0).cgColor
+                ] as CFArray,
+                locations: [0.0, 1.0]
+            ) {
+                ctx.cgContext.drawRadialGradient(
+                    grad,
+                    startCenter: center, startRadius: 0,
+                    endCenter: center, endRadius: glowSize * 0.5,
+                    options: []
+                )
+            }
+        }
+
+        let mat = SCNMaterial()
+        mat.diffuse.contents = tex
+        mat.lightingModel = .constant
+        mat.isDoubleSided = false
+        mat.writesToDepthBuffer = false
+        mat.transparencyMode = .aOne
+        mat.blendMode = .add
+        plane.materials = [mat]
+
+        let node = SCNNode(geometry: plane)
+        node.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
+        node.position = SCNVector3(0, TablePhysics.height + 0.002, 0)
+        node.renderingOrder = -2
+        rootNode.addChildNode(node)
+    }
+
     // MARK: - Physics Colliders (Invisible)
     
     /// 设置不可见的物理碰撞体
@@ -437,73 +578,105 @@ class BilliardScene: SCNScene {
         }
     }
     
-    /// 设置灯光
-    /// 光照配置需要兼容 USDZ 模型的 PBR 材质
-    /// 模拟台球室灯光：头顶灯罩投射柔和集中光线，环境光低
+    /// 摄影棚式三灯系统：Key + IBL + Rim
     private func setupLights() {
-        // 主光源 - 顶部方向光（模拟头顶台球灯）
-        let mainLight = SCNLight()
-        mainLight.type = .directional
-        mainLight.intensity = 150  // 柔和，避免过曝
-        mainLight.castsShadow = true
-        mainLight.shadowRadius = 5
-        mainLight.shadowColor = UIColor.black.withAlphaComponent(0.3)
-        mainLight.shadowMapSize = CGSize(width: 2048, height: 2048)
-        mainLight.color = UIColor(white: 0.95, alpha: 1.0)  // 略暖白
-        
-        let mainLightNode = SCNNode()
-        mainLightNode.light = mainLight
-        mainLightNode.position = SCNVector3(0, 5, 0)
-        mainLightNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
-        rootNode.addChildNode(mainLightNode)
-        lightNodes.append(mainLightNode)
-        
-        // 环境光 - 为 PBR 材质提供基础照明（低强度营造球厅氛围）
-        let ambientLight = SCNLight()
-        ambientLight.type = .ambient
-        ambientLight.intensity = 50  // 较低的环境光，突出台球灯聚光效果
-        ambientLight.color = UIColor(white: 0.8, alpha: 1.0)
-        
-        let ambientLightNode = SCNNode()
-        ambientLightNode.light = ambientLight
-        rootNode.addChildNode(ambientLightNode)
-        lightNodes.append(ambientLightNode)
-        
-        // 台球灯效果 - 模拟球台上方灯罩的聚光灯
-        let fillLight = SCNLight()
-        fillLight.type = .spot
-        fillLight.intensity = 120  // 降低避免过亮
-        fillLight.spotInnerAngle = 60
-        fillLight.spotOuterAngle = 90   // 覆盖整张球台
-        fillLight.castsShadow = true
-        fillLight.shadowRadius = 4
-        fillLight.attenuationStartDistance = 3
-        fillLight.attenuationEndDistance = 10
-        fillLight.color = UIColor(white: 0.95, alpha: 1.0)  // 略暖色温
-        
-        let fillLightNode = SCNNode()
-        fillLightNode.light = fillLight
-        fillLightNode.position = SCNVector3(0, 3.5, 0)  // 略低一些更真实
-        fillLightNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
-        rootNode.addChildNode(fillLightNode)
-        lightNodes.append(fillLightNode)
+        let flags = RenderQualityManager.shared.featureFlags
+
+        // ── 1. Key Light：主顶光（体积 + 阴影 + 高光） ──
+        // 6500K 中性白，pitch ~-82°，唯一投影光源
+        let keyLight = SCNLight()
+        keyLight.type = .directional
+        keyLight.intensity = 750
+        keyLight.color = UIColor(red: 1.0, green: 0.99, blue: 0.96, alpha: 1.0)
+        keyLight.castsShadow = true
+        keyLight.shadowRadius = 2.5
+        keyLight.shadowSampleCount = 16
+        keyLight.shadowColor = UIColor(white: 0.0, alpha: 0.22)
+        keyLight.shadowMapSize = CGSize(width: flags.shadowMapSize, height: flags.shadowMapSize)
+        keyLight.shadowBias = 0.02
+        keyLight.shadowMode = flags.shadowMode
+        keyLight.orthographicScale = 3.0
+
+        let keyLightNode = SCNNode()
+        keyLightNode.light = keyLight
+        keyLightNode.position = SCNVector3(0, 4, 0)
+        keyLightNode.eulerAngles = SCNVector3(-82.0 * Float.pi / 180.0, 0, 0)
+        rootNode.addChildNode(keyLightNode)
+        lightNodes.append(keyLightNode)
+
+        // ── 2. Rim Light：弱侧分离光（轮廓张力） ──
+        // 5500K 略暖，从侧后方打入，不投影
+        let rimLight = SCNLight()
+        rimLight.type = .directional
+        rimLight.intensity = 150
+        rimLight.color = UIColor(red: 1.0, green: 0.96, blue: 0.90, alpha: 1.0)
+        rimLight.castsShadow = false
+
+        let rimLightNode = SCNNode()
+        rimLightNode.light = rimLight
+        // 从右后上方 (yaw ~135°, pitch ~-40°)
+        rimLightNode.eulerAngles = SCNVector3(
+            -40.0 * Float.pi / 180.0,
+            135.0 * Float.pi / 180.0,
+            0
+        )
+        rootNode.addChildNode(rimLightNode)
+        lightNodes.append(rimLightNode)
     }
     
-    /// 设置相机
+    /// 设置相机（HDR + Tone Mapping + SSAO + Bloom 按 Tier 配置）
     private func setupCamera() {
+        let flags = RenderQualityManager.shared.featureFlags
         let camera = SCNCamera()
         camera.zNear = 0.01
         camera.zFar = 100
-        camera.fieldOfView = 60
-        
+        camera.fieldOfView = CameraRigConfig.aimFov
+
+        // ── HDR + Tone Mapping ──
+        camera.wantsHDR = true
+        if flags.toneMappingEnabled {
+            camera.exposureOffset = -0.25
+            camera.minimumExposure = -2.0
+            camera.maximumExposure = 3.0
+            camera.whitePoint = 1.0
+            camera.wantsExposureAdaptation = false
+        }
+
+        // ── SSAO（接触阴影 + 凹角暗化） ──
+        if flags.ssaoEnabled {
+            camera.screenSpaceAmbientOcclusionIntensity = flags.ssaoIntensity
+            camera.screenSpaceAmbientOcclusionRadius = flags.ssaoRadius
+            camera.screenSpaceAmbientOcclusionNormalThreshold = 0.3
+            camera.screenSpaceAmbientOcclusionDepthThreshold = 0.01
+            camera.screenSpaceAmbientOcclusionBias = 0.01
+        } else {
+            camera.screenSpaceAmbientOcclusionIntensity = 0
+        }
+
+        // ── Bloom ──
+        if flags.bloomEnabled {
+            camera.bloomIntensity = flags.bloomIntensity
+            camera.bloomThreshold = flags.bloomThreshold
+            camera.bloomBlurRadius = 4.0
+        }
+
         cameraNode = SCNNode()
         cameraNode.camera = camera
         cameraNode.name = "billiard_camera"
-        
+
         rootNode.addChildNode(cameraNode)
+
+        let rig = CameraRig(cameraNode: cameraNode, tableSurfaceY: TablePhysics.height)
+        cameraRig = rig
+        savedAimZoom = 0
+
+        aimingController = AimingController(cameraRig: rig)
+        viewTransitionController = ViewTransitionController(cameraRig: rig)
+        observationController = ObservationController(cameraRig: rig)
+        autoAlignController = AutoAlignController(cameraRig: rig)
         
-        // 默认第一人称视角
-        setCameraMode(.firstPerson, animated: false)
+        // 默认进入 Aim 态
+        setCameraMode(.aim, animated: false)
         
         print("[BilliardScene] 📷 Camera setup complete:")
         print("[BilliardScene]   cueBallNode exists: \(cueBallNode != nil)")
@@ -524,44 +697,124 @@ class BilliardScene: SCNScene {
     /// 从 USDZ 模型中提取球节点，设置物理体，作为游戏球使用
     private func setupModelBalls() {
         guard let visualNode = tableNode.childNode(withName: "tableVisual", recursively: false) else {
-            print("[BilliardScene] 未找到 tableVisual 节点，使用程序化母球")
-            createCueBall()
+            print("[BilliardScene] ❌ 未找到 tableVisual 节点，USDZ 模型加载失败")
             return
+        }
+        
+        targetBallNodes.removeAll()
+        allBallNodes.removeAll()
+        initialBallPositions.removeAll()
+        
+        func hasRenderableGeometry(_ node: SCNNode) -> Bool {
+            if node.geometry != nil { return true }
+            for child in node.childNodes where hasRenderableGeometry(child) { return true }
+            return false
+        }
+        
+        func firstGeometryNode(in node: SCNNode) -> SCNNode? {
+            if node.geometry != nil { return node }
+            for child in node.childNodes {
+                if let found = firstGeometryNode(in: child) { return found }
+            }
+            return nil
+        }
+        
+        func collectNodes(named targetName: String, in root: SCNNode, result: inout [SCNNode]) {
+            if root.name == targetName {
+                result.append(root)
+            }
+            for child in root.childNodes {
+                collectNodes(named: targetName, in: child, result: &result)
+            }
         }
         
         let ballNames = (0...15).map { "_\($0)" }
         var foundCount = 0
-        
+        var ballSizeVerified = 0
+        var ballSizeMismatch = 0
+        let correctY = TablePhysics.height + BallPhysics.radius
         for name in ballNames {
-            guard let originalBall = visualNode.childNode(withName: name, recursively: true) else {
+            var matches: [SCNNode] = []
+            collectNodes(named: name, in: visualNode, result: &matches)
+            
+            guard !matches.isEmpty else {
                 print("[BilliardScene] 模型中未找到球节点: \(name)")
                 continue
             }
             
+            // _N 通常是空父节点，真实网格在子节点里；以 _N 为提取锚点
+            let anchorNode = matches[0]
+            guard let sourceNode = firstGeometryNode(in: anchorNode) else {
+                print("[BilliardScene] ⚠️ 球 '\(name)' 未找到几何网格节点")
+                continue
+            }
             foundCount += 1
             
-            // 在移除前记录球的世界变换（包含位置、旋转、缩放）
-            let worldTransform = originalBall.worldTransform
-            let worldPos = SCNVector3(worldTransform.m41, worldTransform.m42, worldTransform.m43)
+            // 计算球心世界坐标（不能用 node.position；该模型球心在几何顶点偏移里）
+            let (meshMin, meshMax) = sourceNode.boundingBox
+            let meshCenterLocal = SCNVector3(
+                (meshMin.x + meshMax.x) * 0.5,
+                (meshMin.y + meshMax.y) * 0.5,
+                (meshMin.z + meshMax.z) * 0.5
+            )
+            let worldCenter = sourceNode.convertPosition(meshCenterLocal, to: nil)
             
-            // 提取世界缩放系数（用于计算物理半径）
+            let worldTransform = anchorNode.worldTransform
             let col0 = simd_float3(worldTransform.m11, worldTransform.m12, worldTransform.m13)
             let worldScale = simd_length(col0)
             
-            // 从视觉层移除
-            originalBall.removeFromParentNode()
+            // 以空根节点作为“球心节点”，把原始网格子树平移到以球心为原点
+            // 这样后续 applyBallLayout 只改 ballRoot.position 就不会出现网格跑到台外
+            anchorNode.removeFromParentNode()
+            let originalBall = SCNNode()
+            originalBall.name = name
+            originalBall.transform = SCNMatrix4Identity
+            originalBall.scale = SCNVector3(worldScale, worldScale, worldScale)
             
-            // 设置世界变换（作为 rootNode 的直接子节点，保留旋转和缩放）
-            originalBall.transform = worldTransform
+            let centerInAnchor = sourceNode.convertPosition(meshCenterLocal, to: anchorNode)
+            anchorNode.position = SCNVector3(-centerInAnchor.x, -centerInAnchor.y, -centerInAnchor.z)
+            originalBall.addChildNode(anchorNode)
             
-            // ===== 关键：强制 Y 坐标精确贴合物理台面 =====
-            // 碰撞面顶部 = TablePhysics.height，球心 = 顶部 + 球半径
-            let correctY = TablePhysics.height + BallPhysics.radius
-            originalBall.position = SCNVector3(worldPos.x, correctY, worldPos.z)
+            // ballRoot 位置就是球心位置
+            originalBall.position = SCNVector3(worldCenter.x, correctY, worldCenter.z)
             
-            print("[BilliardScene] 球 '\(name)': 模型Y=\(worldPos.y), 修正Y=\(correctY)")
+            // 二次校正：确保 mesh 的视觉中心与 ballRoot 重合（消除模型局部偏移）
+            if let meshNode = firstGeometryNode(in: originalBall) {
+                let (mmn, mmx) = meshNode.boundingBox
+                let meshCenterLocal2 = SCNVector3(
+                    (mmn.x + mmx.x) * 0.5,
+                    (mmn.y + mmx.y) * 0.5,
+                    (mmn.z + mmx.z) * 0.5
+                )
+                let visualCenterWorld = meshNode.convertPosition(meshCenterLocal2, to: nil)
+                let deltaWorld = SCNVector3(
+                    worldCenter.x - visualCenterWorld.x,
+                    worldCenter.y - visualCenterWorld.y,
+                    worldCenter.z - visualCenterWorld.z
+                )
+                let invScale = worldScale > 0.0001 ? (1.0 / worldScale) : 1.0
+                // root 无旋转，仅有均匀缩放；将世界偏移换算到 root 局部
+                anchorNode.position = anchorNode.position + deltaWorld * invScale
+            }
+            recenterBallVisualIfNeeded(originalBall)
             
-            // 添加物理体（半径需除以缩放系数，因为物理系统会乘以节点缩放）
+            // 验证：3D 模型球的视觉半径（世界空间）是否与 BallPhysics.radius 一致
+            if let meshNode = firstGeometryNode(in: originalBall) {
+                let (mmn, mmx) = meshNode.boundingBox
+                let localHalfX = (mmx.x - mmn.x) * 0.5
+                let localHalfY = (mmx.y - mmn.y) * 0.5
+                let localHalfZ = (mmx.z - mmn.z) * 0.5
+                let localRadius = max(localHalfX, localHalfY, localHalfZ)
+                let worldVisualRadius = Float(localRadius) * worldScale
+                let expectedRadius = BallPhysics.radius
+                let tolerance: Float = 0.0005  // 0.5mm
+                let match = abs(worldVisualRadius - expectedRadius) <= tolerance
+                if match { ballSizeVerified += 1 } else { ballSizeMismatch += 1 }
+                print("[BilliardScene] 球 '\(name)' 尺寸验证: 模型世界半径=\(String(format: "%.5f", worldVisualRadius))m, 物理常数=\(String(format: "%.5f", expectedRadius))m, 一致=\(match ? "✓" : "✗")")
+            }
+            
+            print("[BilliardScene] 球 '\(name)': scale=\(worldScale), renderable=\(hasRenderableGeometry(originalBall)), center=\(originalBall.position)")
+            
             let physRadius = worldScale > 0.001 ? CGFloat(BallPhysics.radius / worldScale) : CGFloat(BallPhysics.radius)
             let physicsBody = SCNPhysicsBody(
                 type: .dynamic,
@@ -573,19 +826,17 @@ class BilliardScene: SCNScene {
             physicsBody.rollingFriction = CGFloat(BallPhysics.rollingDamping)
             physicsBody.angularDamping = CGFloat(BallPhysics.angularDamping)
             physicsBody.damping = CGFloat(BallPhysics.linearDamping)
-            physicsBody.isAffectedByGravity = false  // 台球不需要重力，贴台面移动
+            physicsBody.isAffectedByGravity = false
             originalBall.physicsBody = physicsBody
             
             rootNode.addChildNode(originalBall)
-            attachShadow(to: originalBall)
             
             if name == "_0" {
-                // _0 = 白球 → 设为母球，移动到置球点
                 originalBall.name = "cueBall"
                 cueBallNode = originalBall
                 
                 let cueBallPos = SCNVector3(
-                    -TablePhysics.innerLength / 4,
+                    BilliardScene.headStringX,
                     correctY,
                     0
                 )
@@ -595,24 +846,37 @@ class BilliardScene: SCNScene {
                 
                 print("[BilliardScene] 白球(_0) 已设为母球，位于置球点: \(cueBallPos)")
             } else {
-                let correctedPos = SCNVector3(worldPos.x, correctY, worldPos.z)
+                let correctedPos = SCNVector3(worldCenter.x, correctY, worldCenter.z)
                 targetBallNodes.append(originalBall)
                 initialBallPositions[name] = correctedPos
                 allBallNodes[name] = originalBall
             }
         }
         
-        print("[BilliardScene] 🎱 从模型中提取了 \(foundCount) / 16 个球节点")
-        
-        // 如果没找到白球，降级创建程序化母球
-        if cueBallNode == nil {
-            print("[BilliardScene] ⚠️ 模型中未找到白球，创建程序化母球")
-            createCueBall()
+        // 清除 tableVisual 中同名残留球节点
+        var removedResidual = 0
+        for name in ballNames {
+            while let residual = visualNode.childNode(withName: name, recursively: true) {
+                residual.removeFromParentNode()
+                removedResidual += 1
+            }
         }
         
-        // 诊断：输出所有球的位置摘要
+        if removedResidual > 0 {
+            print("[BilliardScene] 🧹 清除了 \(removedResidual) 个残留球视觉副本")
+        }
+        
+        print("[BilliardScene] 🎱 从模型中提取了 \(foundCount) / 16 个球节点")
+        if foundCount > 0 {
+            print("[BilliardScene] 📐 球尺寸验证汇总: \(ballSizeVerified)/\(foundCount) 与 BallPhysics.radius(\(String(format: "%.5f", BallPhysics.radius))m) 一致" + (ballSizeMismatch > 0 ? ", \(ballSizeMismatch) 个不一致" : ""))
+        }
+        
+        if cueBallNode == nil {
+            print("[BilliardScene] ❌ 模型中未找到白球(_0)，请检查 USDZ 模型")
+        }
+        
         if let cb = cueBallNode {
-            print("[BilliardScene]   母球位置: \(cb.position), scale: \(cb.scale)")
+            print("[BilliardScene]   母球: pos=\(cb.position), scale=\(cb.scale)")
         }
         for ball in targetBallNodes.prefix(3) {
             print("[BilliardScene]   目标球 '\(ball.name ?? "?")': pos=\(ball.position), scale=\(ball.scale)")
@@ -620,299 +884,383 @@ class BilliardScene: SCNScene {
         if targetBallNodes.count > 3 {
             print("[BilliardScene]   ... 和其余 \(targetBallNodes.count - 3) 个目标球")
         }
+        
+        let uniqueXZCount = Set(
+            targetBallNodes.map {
+                "\(Int(($0.position.x * 1000).rounded()))_\(Int(($0.position.z * 1000).rounded()))"
+            }
+        ).count
+        print("[BilliardScene]   目标球唯一 XZ 坐标数: \(uniqueXZCount) / \(targetBallNodes.count)")
+        
+        modelInitialBallPositions = initialBallPositions
+        sanitizeBallLayout()
+        
+        enhanceBallMaterials()
+    }
+    
+    /// 增强所有球体的 PBR 材质 + 接触阴影
+    private func enhanceBallMaterials() {
+        var allBalls: [SCNNode] = []
+        if let cb = cueBallNode { allBalls.append(cb) }
+        allBalls.append(contentsOf: targetBallNodes)
+
+        for ballNode in allBalls {
+            MaterialFactory.applyBallMaterial(to: ballNode)
+            attachShadow(to: ballNode)
+        }
+        print("[BilliardScene] ✨ 已增强 \(allBalls.count) 个球的 PBR 材质 + 接触阴影")
+    }
+    
+    /// 获取球节点的真实视觉中心（世界坐标）
+    func visualCenter(of ballRoot: SCNNode) -> SCNVector3 {
+        func firstGeometryNode(in node: SCNNode) -> SCNNode? {
+            if node.geometry != nil { return node }
+            for child in node.childNodes {
+                if let found = firstGeometryNode(in: child) { return found }
+            }
+            return nil
+        }
+        
+        guard let mesh = firstGeometryNode(in: ballRoot) else { return ballRoot.position }
+        let (mn, mx) = mesh.boundingBox
+        let centerLocal = SCNVector3(
+            (mn.x + mx.x) * 0.5,
+            (mn.y + mx.y) * 0.5,
+            (mn.z + mx.z) * 0.5
+        )
+        return mesh.convertPosition(centerLocal, to: nil)
+    }
+    
+    /// 将球节点移动到指定视觉中心（世界坐标）
+    func alignVisualCenter(of ballRoot: SCNNode, to desiredCenter: SCNVector3) {
+        let current = visualCenter(of: ballRoot)
+        let delta = desiredCenter - current
+        ballRoot.position = ballRoot.position + delta
+    }
+    
+    /// 保证球的“视觉中心”与根节点重合，避免出现台外偏移/重叠错觉
+    private func recenterBallVisualIfNeeded(_ ballRoot: SCNNode) {
+        func firstGeometryNode(in node: SCNNode) -> SCNNode? {
+            if node.geometry != nil { return node }
+            for child in node.childNodes {
+                if let found = firstGeometryNode(in: child) { return found }
+            }
+            return nil
+        }
+        
+        guard let mesh = firstGeometryNode(in: ballRoot) else { return }
+        let (mn, mx) = mesh.boundingBox
+        let centerLocal = SCNVector3(
+            (mn.x + mx.x) * 0.5,
+            (mn.y + mx.y) * 0.5,
+            (mn.z + mx.z) * 0.5
+        )
+        let centerInRoot = mesh.convertPosition(centerLocal, to: ballRoot)
+        
+        let eps: Float = 0.0005
+        guard abs(centerInRoot.x) > eps || abs(centerInRoot.y) > eps || abs(centerInRoot.z) > eps else { return }
+        
+        for child in ballRoot.childNodes {
+            child.position = child.position - centerInRoot
+        }
+    }
+    
+    /// 应用训练用球布局：仅显示并定位指定球，其余目标球隐藏；nil 或空则恢复模型默认 16 球
+    func applyBallLayout(_ positions: [BallPosition]?) {
+        guard let positions = positions, !positions.isEmpty else {
+            initialBallPositions = modelInitialBallPositions
+            for (_, node) in allBallNodes {
+                node.isHidden = false
+            }
+            targetBallNodes = allBallNodes.filter { $0.key != "cueBall" }.map { $0.value }
+            cueBallNode = allBallNodes["cueBall"]
+            return
+        }
+        let correctY = TablePhysics.height + BallPhysics.radius
+        var newInitial: [String: SCNVector3] = [:]
+        let usedTargetNumbers = Set(positions.filter { $0.ballNumber != 0 }.map { $0.ballNumber })
+        for bp in positions {
+            let key = bp.ballNumber == 0 ? "cueBall" : "_\(bp.ballNumber)"
+            guard let node = allBallNodes[key] else { continue }
+            recenterBallVisualIfNeeded(node)
+            let pos = SCNVector3(bp.position.x, correctY, bp.position.z)
+            node.position = pos
+            alignVisualCenter(of: node, to: pos)
+            node.isHidden = false
+            newInitial[key] = pos
+            if let shadow = shadowNodes[key] {
+                shadow.isHidden = false
+                shadow.position = SCNVector3(pos.x, TablePhysics.height + 0.002, pos.z)
+            }
+        }
+        for num in 1...15 where !usedTargetNumbers.contains(num) {
+            let key = "_\(num)"
+            if let node = allBallNodes[key] {
+                node.isHidden = true
+            }
+            shadowNodes[key]?.isHidden = true
+        }
+        sanitizeBallLayout()
+        for (key, node) in allBallNodes where !node.isHidden {
+            newInitial[key] = node.position
+        }
+        initialBallPositions = newInitial
+        targetBallNodes = allBallNodes
+            .filter { $0.key != "cueBall" && !($0.value.isHidden) }
+            .map { $0.value }
+        cueBallNode = allBallNodes["cueBall"]
+        print("[BilliardScene] applyBallLayout: \(positions.count) 球")
     }
     
     // MARK: - Ball Management
     
-    /// 创建母球（降级方案，模型中无球时使用）
-    func createCueBall(at position: SCNVector3? = nil) {
+    /// 恢复母球（从 allBallNodes 中取回 USDZ 模型球，重新加入场景）
+    /// 用于母球落袋后恢复，不创建程序化球
+    func restoreCueBall(at position: SCNVector3? = nil) {
         let defaultPosition = position ?? SCNVector3(
-            -TablePhysics.innerLength / 4,
+            BilliardScene.headStringX,
             TablePhysics.height + BallPhysics.radius,
             0
         )
         
-        cueBallNode = createBall(
-            color: UIColor.white,
-            position: defaultPosition,
-            name: "cueBall"
-        )
-        
-        rootNode.addChildNode(cueBallNode)
-        attachShadow(to: cueBallNode)
-    }
-    
-    /// 创建目标球
-    func createTargetBall(number: Int, at position: SCNVector3) {
-        let color = getBallColor(number: number)
-        let ballNode = createBall(
-            color: color,
-            position: position,
-            name: "ball_\(number)"
-        )
-        
-        // 如果是花色球，添加条纹效果
-        if number >= 9 && number <= 15 {
-            addStripeToball(ballNode, stripeColor: color)
-        }
-        
-        targetBallNodes.append(ballNode)
-        rootNode.addChildNode(ballNode)
-    }
-    
-    /// 创建球体
-    private func createBall(color: UIColor, position: SCNVector3, name: String) -> SCNNode {
-        let ballGeometry = SCNSphere(radius: CGFloat(BallPhysics.radius))
-        
-        let material = SCNMaterial()
-        material.diffuse.contents = color
-        material.specular.contents = UIColor.white
-        material.shininess = 0.8
-        material.reflective.contents = UIColor.gray.withAlphaComponent(0.3)
-        ballGeometry.materials = [material]
-        
-        let ballNode = SCNNode(geometry: ballGeometry)
-        ballNode.name = name
-        ballNode.position = position
-        
-        // 物理体
-        let physicsBody = SCNPhysicsBody(
-            type: .dynamic,
-            shape: SCNPhysicsShape(geometry: ballGeometry, options: nil)
-        )
-        physicsBody.mass = CGFloat(BallPhysics.mass)
-        physicsBody.restitution = CGFloat(BallPhysics.restitution)
-        physicsBody.friction = CGFloat(BallPhysics.friction)
-        physicsBody.rollingFriction = CGFloat(BallPhysics.rollingDamping)
-        physicsBody.angularDamping = CGFloat(BallPhysics.angularDamping)
-        physicsBody.damping = CGFloat(BallPhysics.linearDamping)
-        physicsBody.isAffectedByGravity = false  // 台球不需要重力
-        
-        ballNode.physicsBody = physicsBody
-        
-        attachShadow(to: ballNode)
-        
-        return ballNode
-    }
-    
-    /// 获取球的颜色
-    private func getBallColor(number: Int) -> UIColor {
-        switch number {
-        case 0:
-            return .white  // 母球
-        case 8:
-            return .black  // 黑八
-        case 1...7:
-            let colors = BallColors.solidBalls
-            let c = colors[number - 1]
-            return UIColor(red: c.r, green: c.g, blue: c.b, alpha: 1.0)
-        case 9...15:
-            let colors = BallColors.stripedBalls
-            let c = colors[number - 9]
-            return UIColor(red: c.r, green: c.g, blue: c.b, alpha: 1.0)
-        default:
-            return .gray
-        }
-    }
-    
-    /// 为花色球添加条纹
-    private func addStripeToball(_ ballNode: SCNNode, stripeColor: UIColor) {
-        // 简化版：使用白色底色 + 条纹贴图
-        // 实际实现需要创建条纹纹理
-        if let geometry = ballNode.geometry as? SCNSphere {
-            let material = geometry.firstMaterial
-            material?.diffuse.contents = UIColor.white
-            // TODO: 添加条纹纹理
-        }
-    }
-    
-    // MARK: - Camera Control
-    
-    /// 设置相机模式
-    func setCameraMode(_ mode: CameraMode, animated: Bool = true) {
-        currentCameraMode = mode
-        
-        var newPosition: SCNVector3
-        var useLookAt: SCNVector3? = nil  // 如果非 nil，使用 look(at:) 代替 eulerAngles
-        var newEulerAngles: SCNVector3 = .init(0, 0, 0)
-        var orthographic = false
-        
-        switch mode {
-        case .firstPerson:
-            // 第一人称视角 - 相机放在母球后方，朝向母球前方
-            // 默认瞄准方向 +X（沿球台长轴）
-            if let cueBall = cueBallNode {
-                // 相机在母球后方（-X 方向），高于台面，距离受缩放因子影响
-                let dist = FirstPersonCamera.distance * firstPersonZoomFactor
-                newPosition = SCNVector3(
-                    cueBall.position.x - dist,
-                    TablePhysics.height + FirstPersonCamera.height,
-                    cueBall.position.z
-                )
-                // 朝向母球前方（+X 方向）
-                useLookAt = SCNVector3(
-                    cueBall.position.x + 0.3,
-                    cueBall.position.y,
-                    cueBall.position.z
-                )
-            } else {
-                // 无母球时，默认位置朝向球台中心
-                newPosition = SCNVector3(-FirstPersonCamera.distance - 0.6, TablePhysics.height + FirstPersonCamera.height, 0)
-                useLookAt = SCNVector3(0, TablePhysics.height, 0)
-            }
-            
-        case .topDown2D:
-            // 2D俯视 - 正交投影，从正上方看下去
-            // 微小 Z 偏移避免万向锁，负 Z 确保 X 轴朝右（球台长轴朝右对应手机长边）
-            newPosition = SCNVector3(0, 4.0, -0.001)
-            newEulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
-            orthographic = true
-            
-        case .perspective3D:
-            // 3D透视 - 从球台一端沿长轴方向看（平行于球杆方向）
-            // 相机位于球台短边外侧，高度略高于台面，看向球台中心
-            let halfLength = TablePhysics.innerLength / 2
-            newPosition = SCNVector3(-(halfLength + 1.2), 1.8, 0)
-            useLookAt = SCNVector3(halfLength * 0.3, TablePhysics.height, 0)
-            
-        case .shooting:
-            // 击球视角 - 从母球后方沿球杆方向看
-            if let cueBall = cueBallNode {
-                newPosition = SCNVector3(
-                    cueBall.position.x - 1.0,
-                    cueBall.position.y + 0.3,
-                    cueBall.position.z
-                )
-                useLookAt = SCNVector3(
-                    cueBall.position.x + 0.5,
-                    cueBall.position.y,
-                    cueBall.position.z
-                )
-            } else {
-                newPosition = SCNVector3(-1.5, TablePhysics.height + 0.3, 0)
-                useLookAt = SCNVector3(0, TablePhysics.height, 0)
-            }
-            
-        case .free:
-            // 自由视角 - 保持当前位置
+        guard let ball = allBallNodes["cueBall"] else {
+            print("[BilliardScene] ❌ allBallNodes 中无母球，无法恢复")
             return
         }
         
-        // 设置投影模式
-        cameraNode.camera?.usesOrthographicProjection = orthographic
-        if orthographic {
-            cameraNode.camera?.orthographicScale = 1.0  // 较小的值 = 球台显示更大
-        } else {
-            cameraNode.camera?.fieldOfView = 60
+        if ball.parent == nil {
+            rootNode.addChildNode(ball)
+        }
+        ball.opacity = 1.0
+        ball.isHidden = false
+        ball.position = defaultPosition
+        cueBallNode = ball
+        
+        if let shadow = shadowNodes["cueBall"] {
+            shadow.isHidden = false
+            shadow.position = SCNVector3(defaultPosition.x, TablePhysics.height + 0.002, defaultPosition.z)
         }
         
-        // 动画过渡
-        if animated {
-            SCNTransaction.begin()
-            SCNTransaction.animationDuration = CameraSettings.transitionDuration
-            SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        }
-        
-        cameraNode.position = newPosition
-        if let lookTarget = useLookAt {
-            cameraNode.look(at: lookTarget)
-        } else {
-            cameraNode.eulerAngles = newEulerAngles
-        }
-        
-        if animated {
-            SCNTransaction.commit()
-        }
-        
-        print("[BilliardScene] setCameraMode(\(mode)): pos=\(cameraNode.position), eulerAngles=\(cameraNode.eulerAngles), orthographic=\(orthographic)")
+        alignVisualCenter(of: ball, to: defaultPosition)
+        initialBallPositions["cueBall"] = defaultPosition
     }
     
-    /// 更新第一人称相机（每帧调用）
-    /// - Parameter smooth: 是否使用平滑插值（初始化时应传 false 以立即定位）
-    func updateFirstPersonCamera(cueBallPosition: SCNVector3, aimDirection: SCNVector3, pitchAngle: Float, smooth: Bool = true) {
-        guard currentCameraMode == .firstPerson else { return }
-        
-        // 相机位于母球后方（瞄准方向的反方向），距离受缩放因子影响
-        let behind = SCNVector3(0, 0, 0) - aimDirection * (FirstPersonCamera.distance * firstPersonZoomFactor)
-        
-        // 相机高度使用绝对值：台面高度 + 额外高度
-        // 不要用 cueBallPosition.y 因为它已经包含了 TablePhysics.height
-        let cameraY = TablePhysics.height + FirstPersonCamera.height
-        
-        let targetPos = SCNVector3(
-            cueBallPosition.x + behind.x,
-            cameraY,
-            cueBallPosition.z + behind.z
-        )
-        
-        if smooth {
-            // 平滑插值避免抖动
-            let t = FirstPersonCamera.followSmoothFactor
-            let smoothedPos = SCNVector3(
-                cameraNode.position.x + (targetPos.x - cameraNode.position.x) * t,
-                cameraNode.position.y + (targetPos.y - cameraNode.position.y) * t,
-                cameraNode.position.z + (targetPos.z - cameraNode.position.z) * t
+    // MARK: - Camera Control
+
+    func setCameraMode(_ mode: CameraMode, animated: Bool = true) {
+        currentCameraMode = mode
+        guard let cameraRig else { return }
+
+        switch mode {
+        case .topDown2D:
+            cameraNode.camera?.usesOrthographicProjection = true
+            cameraNode.camera?.orthographicScale = TrainingCameraConfig.topDownOrthographicScale
+            if animated {
+                SCNTransaction.begin()
+                SCNTransaction.animationDuration = TrainingCameraConfig.transitionDuration
+                SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            }
+            // 固定长边俯视：台面正上方，视线朝下（-Y），长边（X 轴 2.54m）水平
+            cameraNode.position = SCNVector3(0, TablePhysics.height + 3.2, 0)
+            cameraNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
+            if animated { SCNTransaction.commit() }
+        case .aim, .action:
+            cameraNode.camera?.usesOrthographicProjection = false
+            cameraNode.camera?.fieldOfView = TrainingCameraConfig.aimFov
+            if let cueBall = cueBallNode {
+                cameraRig.targetPivot = SCNVector3(cueBall.position.x, TablePhysics.height, cueBall.position.z)
+            }
+            if mode == .aim {
+                cameraRig.returnToAim(zoom: savedAimZoom, animated: animated)
+            } else {
+                cameraRig.pushToObservation(animated: animated)
+            }
+        }
+    }
+
+    var currentCameraZoom: Float {
+        cameraRig?.zoom ?? 0
+    }
+
+    func setAimDirectionForCamera(_ aimDirection: SCNVector3) {
+        aimingController?.syncCameraToAimDirection(aimDirection)
+    }
+
+    func updateCameraRig(deltaTime: Float, cueBallPosition: SCNVector3) {
+        guard currentCameraMode != .topDown2D, let cameraRig else { return }
+
+        let camState = cameraStateMachine.currentState
+
+        switch camState {
+        case .aiming, .adjusting:
+            let currentXZ = SIMD2<Float>(cueBallPosition.x, cueBallPosition.z)
+            let moved: Bool
+            if let last = lastTrackedCueBallXZ {
+                moved = simd_distance(last, currentXZ) > 0.001
+            } else {
+                moved = true
+            }
+            if moved {
+                lastTrackedCueBallXZ = currentXZ
+                cameraRig.targetPivot = SCNVector3(cueBallPosition.x, TablePhysics.height, cueBallPosition.z)
+            }
+        case .observing:
+            observationController?.updateObservation(cueBallPosition: cueBallPosition)
+        case .returnToAim:
+            if !cameraRig.isTransitioning {
+                cameraStateMachine.handleEvent(.returnAnimationCompleted)
+            }
+        case .shooting:
+            break
+        }
+
+        cameraRig.update(deltaTime: deltaTime)
+    }
+
+    /// 获取所有目标球的世界坐标（供动态灵敏度计算）
+    func targetBallPositions() -> [SCNVector3] {
+        targetBallNodes.compactMap { node -> SCNVector3? in
+            guard node.parent != nil else { return nil }
+            return visualCenter(of: node)
+        }
+    }
+
+    func applyCameraPan(deltaX: Float, deltaY: Float) {
+        if currentCameraMode == .topDown2D {
+            guard let camera = cameraNode.camera else { return }
+            let scale = Float(camera.orthographicScale)
+            let panSpeed: Float = scale * 0.003
+            let pos = cameraNode.position
+            cameraNode.position = SCNVector3(
+                pos.x - deltaX * panSpeed,
+                pos.y,
+                pos.z - deltaY * panSpeed
             )
-            cameraNode.position = smoothedPos
-        } else {
-            // 立即定位（初始化/切换视角时）
-            cameraNode.position = targetPos
+            return
         }
-        
-        // 看向母球前方（瞄准方向延伸点）
-        let lookTarget = cueBallPosition + aimDirection * 0.3
-        cameraNode.look(at: lookTarget)
-        
-        // 叠加俯仰角微调
-        cameraNode.eulerAngles.x += pitchAngle
+        cameraRig?.handleHorizontalSwipe(delta: deltaX)
+        cameraRig?.handleVerticalSwipe(delta: -deltaY)
     }
-    
-    /// 击球后切换到观察视角
-    func setCameraPostShot(cueBallPosition: SCNVector3) {
-        guard currentCameraMode == .firstPerson else { return }
-        currentCameraMode = .free  // 临时切到自由模式
-        
-        SCNTransaction.begin()
-        SCNTransaction.animationDuration = 0.6
-        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        
-        // 拉高拉远，从球台一端沿长轴方向观察全局
-        // 相机沿 -X 方向后退，保持沿长轴观察
-        let halfLength = TablePhysics.innerLength / 2
-        cameraNode.position = SCNVector3(
-            -(halfLength + 0.8),
-            FirstPersonCamera.postShotHeight,
-            0
+
+    func applyCameraPinch(scale: Float) {
+        cameraRig?.handlePinch(scale: scale)
+    }
+
+    /// 2D 区域缩放：以捏合中心为锚点，直接应用（无插值延迟）
+    func applyTopDownAreaZoom(scale: Float, anchorScreen: CGPoint, in view: SCNView) {
+        guard let camera = cameraNode.camera else { return }
+        let oldScale = camera.orthographicScale
+        let newScale = max(
+            TrainingCameraConfig.topDownMinOrthographicScale,
+            min(TrainingCameraConfig.topDownMaxOrthographicScale, oldScale / Double(scale))
         )
-        cameraNode.look(at: SCNVector3(0, TablePhysics.height, 0))
-        
-        SCNTransaction.commit()
+
+        let viewW = Double(view.bounds.width)
+        let viewH = Double(view.bounds.height)
+        guard viewW > 1, viewH > 1 else { return }
+
+        let nx = Double(anchorScreen.x) / viewW - 0.5
+        let ny = -(Double(anchorScreen.y) / viewH - 0.5)
+        let aspect = viewW / viewH
+
+        let shift = SCNVector3(
+            Float((oldScale - newScale) * 2.0 * aspect * nx),
+            0,
+            Float(-(oldScale - newScale) * 2.0 * ny)
+        )
+
+        camera.orthographicScale = newScale
+        let pos = cameraNode.position
+        cameraNode.position = SCNVector3(pos.x + shift.x, pos.y, pos.z + shift.z)
     }
-    
-    /// 旋转相机（自由视角）
-    func rotateCamera(deltaX: Float, deltaY: Float) {
-        guard currentCameraMode == .free else { return }
-        
-        cameraNode.eulerAngles.y += deltaX * 0.01
-        cameraNode.eulerAngles.x = max(-Float.pi / 2, min(0, cameraNode.eulerAngles.x + deltaY * 0.01))
+
+    /// 每帧调用（2D 模式占位，当前缩放已直接生效无需插值）
+    func updateTopDownZoom() {}
+
+    func shouldLinkAimDirectionWithCamera() -> Bool {
+        currentCameraMode != .topDown2D
     }
-    
-    /// 缩放相机
-    func zoomCamera(scale: Float) {
-        if cameraNode.camera?.usesOrthographicProjection == true {
-            // 正交投影：调整 orthographicScale
-            let currentScale = cameraNode.camera?.orthographicScale ?? 1.0
-            let newScale = max(0.3, min(3.0, currentScale / Double(scale)))
-            cameraNode.camera?.orthographicScale = newScale
-        } else if currentCameraMode == .firstPerson {
-            // 第一人称：调整缩放因子（影响相机到母球距离）
-            firstPersonZoomFactor = max(0.3, min(2.5, firstPersonZoomFactor / scale))
-        } else {
-            // 其他透视模式：调整 FOV
-            let currentFOV = cameraNode.camera?.fieldOfView ?? 60
-            let newFOV = max(30, min(100, currentFOV / CGFloat(scale)))
-            cameraNode.camera?.fieldOfView = newFOV
+
+    func currentAimDirectionFromCamera() -> SCNVector3 {
+        aimingController?.aimDirectionFromCamera() ?? SCNVector3(-1, 0, 0)
+    }
+
+    /// Anchored orbit：锁定白球在屏幕中的投影位置（Aim/Adjusting 态）
+    func lockCueBallScreenAnchor(in view: SCNView, cueBallWorld: SCNVector3, anchorNormalized: CGPoint) {
+        guard currentCameraMode != .topDown2D else { return }
+        let camState = cameraStateMachine.currentState
+        guard (camState == .aiming || camState == .adjusting), let cameraRig else { return }
+        let projected = view.projectPoint(cueBallWorld)
+        guard projected.z.isFinite else { return }
+
+        let width = view.bounds.width
+        let height = view.bounds.height
+        guard width > 1, height > 1 else { return }
+
+        func uiToSceneY(_ uiY: CGFloat) -> CGFloat { height - uiY }
+
+        let currentUI = CGPoint(x: CGFloat(projected.x), y: height - CGFloat(projected.y))
+        let targetUI = CGPoint(x: width * anchorNormalized.x, y: height * anchorNormalized.y)
+        let error = hypot(targetUI.x - currentUI.x, targetUI.y - currentUI.y)
+        if error < 0.5 { return }
+
+        let currentScenePoint = SCNVector3(
+            Float(currentUI.x),
+            Float(uiToSceneY(currentUI.y)),
+            projected.z
+        )
+        let targetScenePoint = SCNVector3(
+            Float(targetUI.x),
+            Float(uiToSceneY(targetUI.y)),
+            projected.z
+        )
+
+        let worldAtCurrent = view.unprojectPoint(currentScenePoint)
+        let worldAtTarget = view.unprojectPoint(targetScenePoint)
+        let correction = worldAtCurrent - worldAtTarget
+
+        cameraRig.translatePivot(
+            deltaXZ: SCNVector3(correction.x, 0, correction.z),
+            immediate: true
+        )
+    }
+
+    func saveCurrentAimZoom() {
+        savedAimZoom = cameraRig?.zoom ?? savedAimZoom
+    }
+
+    /// 击球后进入观察视角（通过状态机驱动）
+    func setCameraPostShot(cueBallPosition: SCNVector3, aimDirection: SCNVector3) {
+        lastTrackedCueBallXZ = nil
+        saveCurrentAimZoom()
+        cameraStateMachine.saveAimContext(aimDirection: aimDirection, zoom: savedAimZoom)
+
+        if TrainingCameraConfig.observationViewEnabled {
+            currentCameraMode = .action
+            observationController?.enterObservation(
+                cueBallPosition: cueBallPosition,
+                aimDirection: aimDirection
+            )
         }
+    }
+
+    /// 球停后开始回归瞄准态
+    func beginReturnToAim(cueBallPosition: SCNVector3, targetDirection: SCNVector3? = nil) {
+        currentCameraMode = .aim
+
+        let savedDir = targetDirection ?? cameraStateMachine.savedAimDirection
+        let savedZoom = cameraStateMachine.savedAimZoom
+        let targetYaw = autoAlignController?.yawFromDirection(savedDir) ?? 0
+
+        observationController?.beginReturnToAim(
+            cueBallPosition: cueBallPosition,
+            savedZoom: savedZoom,
+            targetYaw: targetYaw
+        )
+    }
+
+    func returnCameraToAim(animated: Bool) {
+        setCameraMode(.aim, animated: animated)
     }
     
     // MARK: - Ball Surface Constraint
@@ -920,7 +1268,7 @@ class BilliardScene: SCNScene {
     /// 每帧调用：约束所有球贴合台面（消除 Y 方向的任何漂移或弹跳）
     func constrainBallsToSurface() {
         let surfaceY = TablePhysics.height + BallPhysics.radius
-        let shadowY = TablePhysics.height + 0.001
+        let shadowY = TablePhysics.height + 0.002
         
         func constrain(_ ball: SCNNode) {
             guard ball.parent != nil else { return }  // 已进袋的球跳过
@@ -951,35 +1299,52 @@ class BilliardScene: SCNScene {
         }
     }
     
+    /// 每帧更新阴影位置（兼容 SCNAction 播放中的 presentation 位置）
+    func updateShadowPositions() {
+        let shadowY = TablePhysics.height + 0.002
+        for (name, shadow) in shadowNodes {
+            guard let ball = allBallNodes[name], ball.parent != nil else { continue }
+            let pos = ball.presentation.position
+            shadow.position = SCNVector3(pos.x, shadowY, pos.z)
+        }
+    }
+    
     // MARK: - Aim Line
     
     /// 显示瞄准线
     func showAimLine(from start: SCNVector3, direction: SCNVector3, length: Float) {
-        // 移除旧的瞄准线
-        aimLineNode?.removeFromParentNode()
-        
-        let lineGeometry = SCNCylinder(radius: 0.003, height: CGFloat(length))
-        let material = SCNMaterial()
-        material.diffuse.contents = UIColor.white.withAlphaComponent(0.8)
-        material.emission.contents = UIColor.white.withAlphaComponent(0.3)
-        lineGeometry.materials = [material]
-        
-        aimLineNode = SCNNode(geometry: lineGeometry)
-        aimLineNode?.position = start + direction * (length / 2)
+        let lineNode: SCNNode
+        if let existing = aimLineNode {
+            lineNode = existing
+        } else {
+            let lineGeometry = SCNCylinder(radius: 0.0015, height: CGFloat(length))
+            let material = SCNMaterial()
+            material.diffuse.contents = UIColor.white.withAlphaComponent(0.8)
+            material.emission.contents = UIColor.white.withAlphaComponent(0.3)
+            lineGeometry.materials = [material]
+            let node = SCNNode(geometry: lineGeometry)
+            rootNode.addChildNode(node)
+            aimLineNode = node
+            lineNode = node
+        }
+
+        if let cylinder = lineNode.geometry as? SCNCylinder {
+            cylinder.height = CGFloat(length)
+        }
+
+        lineNode.position = start + direction * (length / 2)
         
         // 旋转使圆柱体指向方向
         let up = SCNVector3(0, 1, 0)
         let axis = up.cross(direction).normalized()
         let angle = acos(up.dot(direction))
-        aimLineNode?.rotation = SCNVector4(axis.x, axis.y, axis.z, angle)
-        
-        rootNode.addChildNode(aimLineNode!)
+        lineNode.rotation = SCNVector4(axis.x, axis.y, axis.z, angle)
+        lineNode.isHidden = false
     }
     
     /// 隐藏瞄准线
     func hideAimLine() {
-        aimLineNode?.removeFromParentNode()
-        aimLineNode = nil
+        aimLineNode?.isHidden = true
     }
     
     // MARK: - Predicted Trajectory
@@ -1078,19 +1443,50 @@ class BilliardScene: SCNScene {
     func hideGhostBall() {
         ghostBallNode?.isHidden = true
     }
+
+    // MARK: - Ball Selection Highlight
+
+    private static let selectionRingName = "_selectionRing"
+
+    /// 在目标球下方添加选中高亮环
+    func addSelectionHighlight(to node: SCNNode) {
+        removeSelectionHighlight(from: node)
+        let ring = SCNTorus(ringRadius: CGFloat(BallPhysics.radius * 1.3), pipeRadius: 0.002)
+        let mat = SCNMaterial()
+        mat.diffuse.contents = UIColor.systemYellow
+        mat.emission.contents = UIColor.systemYellow
+        ring.materials = [mat]
+        let ringNode = SCNNode(geometry: ring)
+        ringNode.name = BilliardScene.selectionRingName
+        ringNode.position = SCNVector3(0, -BallPhysics.radius + 0.002, 0)
+        node.addChildNode(ringNode)
+    }
+
+    /// 移除目标球的选中高亮环
+    func removeSelectionHighlight(from node: SCNNode) {
+        node.childNodes
+            .filter { $0.name == BilliardScene.selectionRingName }
+            .forEach { $0.removeFromParentNode() }
+    }
     
     private func attachShadow(to ball: SCNNode) {
         guard let name = ball.name, shadowNodes[name] == nil else { return }
-        let shadow = SCNCylinder(radius: CGFloat(BallPhysics.radius * 0.9), height: 0.001)
+
+        let radius = CGFloat(BallPhysics.radius * 2.2)
+        let shadowPlane = SCNPlane(width: radius * 2, height: radius * 2)
         let material = SCNMaterial()
-        material.diffuse.contents = UIColor.black.withAlphaComponent(0.25)
+        material.diffuse.contents = MaterialFactory.generateContactShadowTexture(size: 128)
         material.isDoubleSided = true
-        shadow.materials = [material]
-        
-        let shadowNode = SCNNode(geometry: shadow)
+        material.writesToDepthBuffer = false
+        material.lightingModel = .constant
+        material.transparencyMode = .aOne
+        shadowPlane.materials = [material]
+
+        let shadowNode = SCNNode(geometry: shadowPlane)
         shadowNode.name = "\(name)_shadow"
-        shadowNode.position = SCNVector3(ball.position.x, TablePhysics.height + 0.001, ball.position.z)
-        // SCNCylinder 轴沿 Y，圆面已在 XZ 平面上，无需旋转
+        shadowNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
+        shadowNode.position = SCNVector3(ball.position.x, TablePhysics.height + 0.002, ball.position.z)
+        shadowNode.renderingOrder = -1
         rootNode.addChildNode(shadowNode)
         shadowNodes[name] = shadowNode
     }
@@ -1110,9 +1506,245 @@ class BilliardScene: SCNScene {
         cueBallNode = nil
     }
     
+    /// 移动母球到指定位置（placing 模式）
+    /// - Returns: 移动是否成功（不与其他球重叠时成功）
+    @discardableResult
+    func moveCueBall(to position: SCNVector3, checkCollision: Bool = true) -> Bool {
+        guard let cueBall = cueBallNode else { return false }
+        
+        let R = BallPhysics.radius
+        let halfL = TablePhysics.innerLength / 2
+        let halfW = TablePhysics.innerWidth / 2
+        
+        // 台面边界约束
+        let clampedX = max(-halfL + R, min(halfL - R, position.x))
+        let clampedZ = max(-halfW + R, min(halfW - R, position.z))
+        let surfaceY = TablePhysics.height + R
+        let targetPos = SCNVector3(clampedX, surfaceY, clampedZ)
+        
+        if checkCollision {
+            let minDist = R * 2 + 0.002
+            for ball in targetBallNodes {
+                guard ball.parent != nil, !ball.isHidden else { continue }
+                let dx = ball.position.x - targetPos.x
+                let dz = ball.position.z - targetPos.z
+                if dx * dx + dz * dz < minDist * minDist {
+                    return false
+                }
+            }
+        }
+        
+        cueBall.position = targetPos
+        if let shadow = shadowNodes["cueBall"] {
+            shadow.position = SCNVector3(targetPos.x, TablePhysics.height + 0.002, targetPos.z)
+        }
+        return true
+    }
+    
     /// 获取袋口列表
     func pockets() -> [Pocket] {
         return tableGeometry.pockets
+    }
+    
+    // MARK: - Rack Layout (Chinese Eight-Ball)
+    
+    /// 设置标准中式八球三角阵摆球
+    /// 15 颗目标球排成三角形（5行：1+2+3+4+5），白球在开球线后
+    /// 规则：8号球在第3行中间，底边两角分别为一颗全色球和一颗花色球
+    func setupRackLayout() {
+        let R = BallPhysics.radius
+        // 开球三角应紧密贴球；过大间隙会导致只撞动第一颗，无法传递
+        let gap: Float = 0.0008
+        let rowOffset = (R * 2 + gap) * sqrt(3.0) / 2.0
+        
+        // 置球点 (foot spot): 台面左半区 1/4 处，三角阵从这里向 -X 展开（远离白球）
+        let footSpotX = -TablePhysics.innerLength / 4
+        // 开球线 (head string): 台面右半区 1/4 处，白球放这里
+        let headX = BilliardScene.headStringX
+        
+        // 生成 15 个三角阵格子坐标 (row=0 顶球 → row=4 底边)
+        var slots: [(x: Float, z: Float)] = []
+        for row in 0..<5 {
+            let ballsInRow = row + 1
+            for col in 0..<ballsInRow {
+                let x = footSpotX - Float(row) * rowOffset
+                let zStart = Float(row) * (R + gap / 2)
+                let z = zStart - Float(col) * (R * 2 + gap)
+                slots.append((x, z))
+            }
+        }
+        
+        // 球号分配: 8号 → slot 4 (row2 中间)，底边两角一全一花
+        var solids = Array(1...7).shuffled()
+        var stripes = Array(9...15).shuffled()
+        var assignment = Array(repeating: 0, count: 15)
+        
+        // 8号球: row=2, col=1 → slot index 4
+        assignment[4] = 8
+        
+        // 底边两角: slot 10 (row4 col0) 和 slot 14 (row4 col4)
+        let cornerSolid = solids.removeLast()
+        let cornerStripe = stripes.removeLast()
+        if Bool.random() {
+            assignment[10] = cornerSolid
+            assignment[14] = cornerStripe
+        } else {
+            assignment[10] = cornerStripe
+            assignment[14] = cornerSolid
+        }
+        
+        var remaining = (solids + stripes).shuffled()
+        for i in 0..<15 where assignment[i] == 0 {
+            assignment[i] = remaining.removeFirst()
+        }
+        
+        // 构建 BallPosition 数组
+        var positions: [BallPosition] = []
+        
+        // 白球: 开球线后
+        positions.append(BallPosition(ballNumber: 0, x: headX, z: 0))
+        
+        // 15 颗目标球
+        for (i, slot) in slots.enumerated() {
+            positions.append(BallPosition(ballNumber: assignment[i], x: slot.x, z: slot.z))
+        }
+        
+        print("[BilliardScene] setupRackLayout: 白球 x=\(headX), 三角阵顶球 x=\(footSpotX), allBallNodes 数量=\(allBallNodes.count)")
+        applyBallLayout(positions)
+    }
+
+    /// 修正布局中的球体重叠，避免出现穿插导致的“无碰撞”
+    func sanitizeBallLayout(iterations: Int = 10) {
+        let R = BallPhysics.radius
+        let minCenterDist = R * 2 + 0.0005
+        let minCenterDistSq = minCenterDist * minCenterDist
+        let halfL = TablePhysics.innerLength / 2 - R
+        let halfW = TablePhysics.innerWidth / 2 - R
+
+        var balls: [SCNNode] = []
+        if let cue = cueBallNode, cue.parent != nil, !cue.isHidden { balls.append(cue) }
+        balls.append(contentsOf: targetBallNodes.filter { $0.parent != nil && !$0.isHidden })
+        guard balls.count >= 2 else { return }
+
+        for _ in 0..<iterations {
+            var adjusted = false
+
+            for i in 0..<(balls.count - 1) {
+                for j in (i + 1)..<balls.count {
+                    let a = balls[i]
+                    let b = balls[j]
+                    let pa = visualCenter(of: a)
+                    let pb = visualCenter(of: b)
+
+                    var dx = pb.x - pa.x
+                    var dz = pb.z - pa.z
+                    let d2 = dx * dx + dz * dz
+                    if d2 >= minCenterDistSq { continue }
+
+                    let dist = sqrtf(max(d2, 1e-10))
+                    if dist < 1e-5 {
+                        dx = 1
+                        dz = 0
+                    } else {
+                        dx /= dist
+                        dz /= dist
+                    }
+
+                    let overlap = minCenterDist - max(dist, 1e-5)
+                    let push = overlap * 0.5
+                    let pushVec = SCNVector3(dx * push, 0, dz * push)
+
+                    let desiredA = SCNVector3(
+                        max(-halfL, min(halfL, pa.x - pushVec.x)),
+                        TablePhysics.height + R,
+                        max(-halfW, min(halfW, pa.z - pushVec.z))
+                    )
+                    let desiredB = SCNVector3(
+                        max(-halfL, min(halfL, pb.x + pushVec.x)),
+                        TablePhysics.height + R,
+                        max(-halfW, min(halfW, pb.z + pushVec.z))
+                    )
+
+                    alignVisualCenter(of: a, to: desiredA)
+                    alignVisualCenter(of: b, to: desiredB)
+                    adjusted = true
+                }
+            }
+
+            if !adjusted { break }
+        }
+    }
+    
+    /// 获取开球线 X 坐标（head string line）
+    /// 开球时白球必须位于此线右侧（x > headStringX 的正半区）
+    static var headStringX: Float {
+        TablePhysics.innerLength / 4
+    }
+
+    // MARK: - Render Feature Toggle (A/B comparison)
+
+    /// Toggle a render feature on/off for screenshot comparison.
+    func setRenderFeature(_ feature: RenderFeature, enabled: Bool) {
+        RenderQualityManager.shared.setOverride(feature, enabled: enabled)
+        reapplyRenderSettings()
+    }
+
+    /// Clear all feature overrides and restore tier defaults.
+    func clearRenderOverrides() {
+        RenderQualityManager.shared.clearAllOverrides()
+        reapplyRenderSettings()
+    }
+
+    /// Reapply all rendering settings to reflect current tier / overrides.
+    func reapplyRenderSettings() {
+        setupEnvironment()
+        reapplyLightSettings()
+        reapplyCameraSettings()
+        enhanceBallMaterials()
+        MaterialFactory.enhanceClothMaterials(in: tableNode)
+        MaterialFactory.enhanceRailMaterials(in: tableNode)
+        MaterialFactory.enhancePocketMaterials(in: tableNode)
+    }
+
+    private func reapplyLightSettings() {
+        let flags = RenderQualityManager.shared.featureFlags
+        for node in lightNodes {
+            guard let light = node.light else { continue }
+            if light.type == .directional {
+                light.shadowMapSize = CGSize(width: flags.shadowMapSize, height: flags.shadowMapSize)
+                light.shadowSampleCount = flags.shadowSampleCount
+                light.shadowRadius = flags.shadowRadius
+                light.shadowMode = flags.shadowMode
+            }
+        }
+    }
+
+    private func reapplyCameraSettings() {
+        guard let camera = cameraNode.camera else { return }
+        let flags = RenderQualityManager.shared.featureFlags
+
+        if flags.ssaoEnabled {
+            camera.screenSpaceAmbientOcclusionIntensity = flags.ssaoIntensity
+            camera.screenSpaceAmbientOcclusionRadius = flags.ssaoRadius
+        } else {
+            camera.screenSpaceAmbientOcclusionIntensity = 0
+        }
+
+        if flags.bloomEnabled {
+            camera.bloomIntensity = flags.bloomIntensity
+            camera.bloomThreshold = flags.bloomThreshold
+            camera.bloomBlurRadius = 4.0
+        } else {
+            camera.bloomIntensity = 0
+        }
+
+        if flags.toneMappingEnabled {
+            camera.exposureOffset = -0.25
+            camera.whitePoint = 1.0
+        } else {
+            camera.exposureOffset = 0
+            camera.whitePoint = 1.0
+        }
     }
     
     // MARK: - Reset
@@ -1144,12 +1776,12 @@ class BilliardScene: SCNScene {
         for (name, shadow) in shadowNodes {
             shadow.isHidden = false
             if let ball = allBallNodes[name] {
-                shadow.position = SCNVector3(ball.position.x, TablePhysics.height + 0.001, ball.position.z)
+                shadow.position = SCNVector3(ball.position.x, TablePhysics.height + 0.002, ball.position.z)
             }
         }
         
-        // 重置缩放因子
-        firstPersonZoomFactor = 1.0
+        savedAimZoom = 0
+        cameraRig?.setTargetZoom(0)
         
         hideAimLine()
     }

@@ -135,6 +135,23 @@ struct TablePhysics {
     
     /// 重力加速度 (m/s^2)
     static let gravity: Float = 9.81
+    
+    /// 台面相对地面的高度 (米)，与 SceneLayout.groundLevelY 配合使用
+    /// 球台台面 = groundLevelY + height，球台立于地面之上
+    static var tableSurfaceY: Float { SceneLayout.groundLevelY + height }
+}
+
+// MARK: - 场景布局（地面与坐标系）
+/// 场景世界坐标系：地面为参考，3D 视角下相机等与地面固定关系一致
+struct SceneLayout {
+    /// 地面高度 (米)，场景 Y 轴零点，球台立于地面之上
+    static let groundLevelY: Float = 0
+    
+    /// 3D 透视视角下相机视线高度（相对地面），固定在地面之上的人眼高度
+    static let cameraEyeHeightAboveGround: Float = 1.6
+    
+    /// 击球后观察视角相机相对地面的高度 (米)
+    static let postShotCameraHeightAboveGround: Float = 2.0
 }
 
 // MARK: - 旋转物理参数
@@ -171,23 +188,22 @@ struct SpinPhysics {
 
 // MARK: - 击球力度参数
 struct StrokePhysics {
-    /// 最小击球速度 (m/s)
-    static let minVelocity: Float = 0.5
+    /// 力度条满格 (100) 对应的杆头速度 (m/s)
+    static let maxVelocity: Float = 6.5
     
-    /// 最大击球速度 (m/s)
-    static let maxVelocity: Float = 8.0
+    /// 幂函数曲线指数 — 前段细腻、后段爆发
+    static let powerGamma: Float = 1.8
     
-    /// 轻杆速度阈值
-    static let softVelocity: Float = 2.0
+    /// 力度条死区 (0-100)：低于此值视为 0，避免轻触抖动
+    static let deadZone: Float = 2.0
     
-    /// 中杆速度阈值
-    static let mediumVelocity: Float = 4.5
-    
-    /// 重杆速度阈值
-    static let hardVelocity: Float = 6.5
-    
-    /// 发力杆速度阈值
-    static let powerVelocity: Float = 8.0
+    /// 将 0-100 力度映射为杆头速度 (m/s)
+    static func velocity(forPower p: Float) -> Float {
+        let clamped = min(max(p, 0), 100)
+        guard clamped >= deadZone else { return 0 }
+        let normalized = clamped / 100.0
+        return maxVelocity * powf(normalized, powerGamma)
+    }
 }
 
 // MARK: - 球杆物理参数
@@ -220,32 +236,76 @@ struct AimingSystem {
     static let separationAngleThreshold: Float = 90.0
 }
 
-// MARK: - 相机参数
-struct CameraSettings {
-    /// 2D俯视角度 (度)
-    static let topDownAngle: Float = 90.0
-    
-    /// 3D默认角度 (度)
-    static let perspective3DAngle: Float = 45.0
-    
-    /// 击球视角角度 (度)
-    static let shootingAngle: Float = 15.0
-    
-    /// 最小相机距离 (米)
-    static let minDistance: Float = 0.5
-    
-    /// 最大相机距离 (米)
-    static let maxDistance: Float = 5.0
-    
-    /// 默认相机距离 (米)
-    static let defaultDistance: Float = 2.5
-    
-    /// 相机移动平滑系数
-    static let smoothFactor: Float = 0.1
-    
-    /// 视角切换动画时长 (秒)
+// MARK: - 训练摄像系统参数
+struct TrainingCameraConfig {
+    // MARK: FOV
+    static let aimFov: CGFloat = 40        // 俯身瞄准 FOV
+    static let standFov: CGFloat = 30      // 站立观察 FOV（窄视角减少透视畸变）
+    static let fov: CGFloat = 30           // 兼容旧引用，取观察值
+
+    // MARK: zoom 范围（0=俯身瞄准，1=站立观察）
+    static let minZoom: Float = 0.0
+    static let maxZoom: Float = 1.0
+
+    // MARK: 人体姿态约束 - 距离（相机到白球的水平距离）
+    static let aimRadius: Float = 0.8       // 俯身瞄准：0.5m
+    // 观察距离 d=3.0m, 水平分量 = d × cos(28°) ≈ 2.65m
+    static let standRadius: Float = 2.65    // 站立观察：2.65m
+
+    // MARK: 人体姿态约束 - 高度（相对台面的视线高度）
+    static let aimHeight: Float = 0.10      // 俯身瞄准：台面上方 0.10m（接近球面高度）
+    // 观察高度 = d × sin(28°) ≈ 1.41m
+    static let standHeight: Float = 1.41    // 站立观察：台面上方 1.41m
+
+    // MARK: 人体姿态约束 - 俯角
+    static let aimPitchDeg: Float = -15     // 俯身瞄准俯角，接近水平
+    static let standPitchDeg: Float = -28   // 站立观察俯角
+    static let aimPitchRad: Float = -15 * .pi / 180
+    static let standPitchRad: Float = -28 * .pi / 180
+
+    // MARK: pitch 约束区间
+    static let minPitchRad: Float = -28 * .pi / 180
+    static let maxPitchRad: Float = -15 * .pi / 180
+
+    // MARK: 瞄准灵敏度 - 基础
+    static let aimYawSensitivity: Float = 0.001
+    static let standYawSensitivity: Float = 0.005
+    static let dampingFactor: Float = 0.12
+
+    // MARK: 动态灵敏度（有球/无球区域自适应）
+    static let highSensitivity: Float = 0.003     // 无球区域快速转向
+    static let lowSensitivity: Float = 0.0008     // 有球区域精细瞄准
+    static let sensitivityTransitionAngle: Float = 15  // 过渡角度（度）
+
+    // MARK: 视角过渡
+    static let zoomSwipeSensitivity: Float = 0.002
+    static let zoomPinchSensitivity: Float = 0.25
+
+    // MARK: 观察视角
+    static let observationZoom: Float = 1.0
+    static let observationFollowsCueBall: Bool = false
+
+    // MARK: 过渡动画
+    static let returnToAimDuration: Float = 0.5
     static let transitionDuration: Double = 0.5
+    static let cameraTransitionSpeed: Float = 3.0   // 摄像机过渡速度（米/秒），观察距离增大后提速保持合理过渡时长
+
+    // MARK: 安全约束
+    static let minHeightAboveTable: Float = 0.05
+    static let minDistance: Float = 0.3
+
+    // MARK: 开关系统
+    static var autoAlignEnabled: Bool = false
+    static var observationViewEnabled: Bool = true
+
+    // MARK: TopDown（固定长边俯视：orthographicScale = 可见半高，横屏下桌面尽量铺满）
+    static var topDownOrthographicScale: Double { Double(TablePhysics.innerWidth) * 0.85 }
+    static let topDownMinOrthographicScale: Double = 0.3
+    static let topDownMaxOrthographicScale: Double = 2.0
 }
+
+// MARK: - 旧名兼容（过渡期使用，逐步迁移后移除）
+typealias CameraRigConfig = TrainingCameraConfig
 
 // MARK: - 颗星系统参数
 struct DiamondSystem {
@@ -297,8 +357,9 @@ struct CueStickSettings {
     /// 皮头高度 (米)
     static let tipHeight: Float = 0.012
     
-    /// 皮头到母球的默认间距 (米)
-    static let tipOffset: Float = 0.002
+    /// 皮头到母球表面的默认间距 (米)
+    /// 实际偏移 = 球半径 + 间隙，确保皮头贴在球面外而非穿入球心
+    static let tipOffset: Float = BallPhysics.radius + 0.001
     
     /// 最大后拉距离 (米)
     static let maxPullBack: Float = 0.3
@@ -310,41 +371,6 @@ struct CueStickSettings {
     static let pullBackDuration: Double = 0.05
 }
 
-// MARK: - 第一人称相机参数
-struct FirstPersonCamera {
-    /// 相机到母球水平距离 (米)
-    static let distance: Float = 0.6
-    
-    /// 相机高于台面高度 (米)
-    static let height: Float = 0.45
-    
-    /// 最小俯仰角 (弧度，负值向下看)
-    static let minPitch: Float = -0.4
-    
-    /// 最大俯仰角 (弧度)
-    static let maxPitch: Float = -0.05
-    
-    /// 默认俯仰角 (弧度)
-    static let defaultPitch: Float = -0.15
-    
-    /// 瞄准灵敏度 (弧度/像素)
-    static let aimSensitivity: Float = 0.003
-    
-    /// 精细瞄准灵敏度 (弧度/像素)
-    static let fineSensitivity: Float = 0.0006
-    
-    /// 相机跟随平滑系数
-    static let followSmoothFactor: Float = 0.15
-    
-    /// 击球后相机返回第一人称的过渡时长 (秒)
-    static let returnDuration: Double = 0.8
-    
-    /// 击球后观察视角高度 (米)
-    static let postShotHeight: Float = 2.0
-    
-    /// 击球后观察视角与台面中心的水平距离 (米)
-    static let postShotDistance: Float = 1.5
-}
 
 // MARK: - 球体颜色定义
 struct BallColors {

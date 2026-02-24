@@ -54,12 +54,15 @@ struct TrainingConfig {
 
     // MARK: - Preset Configs
 
-    /// 瞄准训练配置
+    /// 瞄准训练配置（一星难度：仅 2 球，白球 + 1 颗目标球，位置随机，进 1 球即达标；其余难度：默认 16 球，进 10 球）
     static func aimingConfig(difficulty: Int) -> TrainingConfig {
-        TrainingConfig(
+        let isOneStar = (difficulty == 1)
+        let ballPositions: [BallPosition] = isOneStar ? BallPosition.randomTwoBallLayout() : []
+        return TrainingConfig(
             groundId: "aiming",
             difficulty: difficulty,
-            goalCount: 10,
+            ballPositions: ballPositions,
+            goalCount: isOneStar ? 1 : 10,
             trainingType: .aiming
         )
     }
@@ -186,6 +189,43 @@ struct BallPosition {
         let radians = angle * .pi / 180
         let z = 0.5 * sin(radians)
         return BallPosition(ballNumber: number, x: 0.5, z: z)
+    }
+
+    /// 台面可放置球的有效区域（球心边界，留出半径余量）
+    private static var playableBounds: (xMin: Float, xMax: Float, zMin: Float, zMax: Float) {
+        let r = BallPhysics.radius
+        let halfL = TablePhysics.innerLength / 2
+        let halfW = TablePhysics.innerWidth / 2
+        return (xMin: -halfL + r, xMax: halfL - r, zMin: -halfW + r, zMax: halfW - r)
+    }
+
+    /// 在有效区域内生成一个随机 (x, z)，球心不超出台面
+    private static func randomPointInPlayable() -> (x: Float, z: Float) {
+        let b = playableBounds
+        let x = Float.random(in: b.xMin...b.xMax)
+        let z = Float.random(in: b.zMin...b.zMax)
+        return (x, z)
+    }
+
+    /// 两球最小中心距（避免重叠）
+    private static var twoBallMinDistance: Float {
+        2 * BallPhysics.radius + 0.01
+    }
+
+    /// 随机生成 2 球布局：球 0（白球）+ 球 1（目标球），均来自 USDZ，位置随机且不重叠
+    static func randomTwoBallLayout() -> [BallPosition] {
+        let (x0, z0) = randomPointInPlayable()
+        var (x1, z1) = randomPointInPlayable()
+        let minDistSq = twoBallMinDistance * twoBallMinDistance
+        var tries = 0
+        while (x1 - x0) * (x1 - x0) + (z1 - z0) * (z1 - z0) < minDistSq, tries < 100 {
+            (x1, z1) = randomPointInPlayable()
+            tries += 1
+        }
+        return [
+            BallPosition(ballNumber: 0, x: x0, z: z0),
+            BallPosition(ballNumber: 1, x: x1, z: z1)
+        ]
     }
 }
 

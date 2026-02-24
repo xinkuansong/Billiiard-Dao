@@ -225,6 +225,87 @@ struct CollisionDetector {
         return [(-b - sqrtD) / (2.0 * a), (-b + sqrtD) / (2.0 * a)]
     }
     
+    // MARK: - Ball-Circular Cushion Collision
+    
+    /// Find collision time between a ball and a circular cushion arc segment.
+    ///
+    /// Collision condition: `|ball_center - arc_center| = arc_radius + ball_radius`
+    /// (outer contact). Roots are filtered by:
+    /// 1. Angular range — contact point must lie on the finite arc
+    /// 2. Approach direction — ball must be moving toward the surface (`d(dist)/dt > 0`)
+    /// 3. Pocket exclusion — contact point must not fall inside any pocket region
+    /// 4. Contact verification — numerical distance must match D within tolerance
+    static func ballCircularCushionTime(
+        p: SCNVector3,
+        v: SCNVector3,
+        a: SCNVector3,
+        arc: CircularCushionSegment,
+        R: Float,
+        maxTime: Double,
+        pockets: [Pocket] = []
+    ) -> Float? {
+        let D = Double(arc.radius + R)
+        
+        let dpx = Double(p.x - arc.center.x)
+        let dpz = Double(p.z - arc.center.z)
+        let dvx = Double(v.x)
+        let dvz = Double(v.z)
+        let hax = Double(a.x) * 0.5
+        let haz = Double(a.z) * 0.5
+        
+        let c4 = hax * hax + haz * haz
+        let c3 = 2.0 * (dvx * hax + dvz * haz)
+        let c2 = dvx * dvx + dvz * dvz + 2.0 * (dpx * hax + dpz * haz)
+        let c1 = 2.0 * (dpx * dvx + dpz * dvz)
+        let c0 = dpx * dpx + dpz * dpz - D * D
+        
+        let roots = QuarticSolver.solveQuartic(a: c4, b: c3, c: c2, d: c1, e: c0)
+        
+        let epsilon = 1e-4
+        var best: Double? = nil
+        
+        for t in roots {
+            guard t > epsilon && t <= Double(maxTime) + epsilon && t.isFinite && !t.isNaN else { continue }
+            
+            // Ball-to-center relative position at time t
+            let bx = dpx + dvx * t + hax * t * t
+            let bz = dpz + dvz * t + haz * t * t
+            
+            // 1) Angular range check
+            var angle = Float(atan2(bz, bx))
+            if angle < 0 { angle += Float.pi * 2 }
+            guard arc.isAngleInRange(angle) else { continue }
+            
+            // 2) Contact distance verification (filter numerical noise)
+            let distSq = bx * bx + bz * bz
+            let relError = abs(distSq - D * D) / (D * D)
+            guard relError < 0.05 else { continue }
+            
+            // 3) Pocket exclusion: skip if contact point falls inside a pocket region
+            let contactWorldX = Float(bx) + arc.center.x
+            let contactWorldZ = Float(bz) + arc.center.z
+            let contactPos = SCNVector3(contactWorldX, p.y, contactWorldZ)
+            var nearPocket = false
+            for pocket in pockets {
+                let dx = contactPos.x - pocket.center.x
+                let dz = contactPos.z - pocket.center.z
+                let dist = sqrtf(dx * dx + dz * dz)
+                if dist < pocket.radius + R * 0.5 {
+                    nearPocket = true
+                    break
+                }
+            }
+            guard !nearPocket else { continue }
+            
+            if best == nil || t < best! {
+                best = t
+            }
+        }
+        
+        guard let result = best else { return nil }
+        return Float(result)
+    }
+    
     // MARK: - Helper Methods
     
     /// Find the smallest positive root from an array of roots
