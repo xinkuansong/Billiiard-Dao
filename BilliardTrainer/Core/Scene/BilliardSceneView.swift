@@ -34,9 +34,17 @@ struct BilliardSceneView: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: SCNView, context: Context) {
-        // 确保 pointOfView 始终指向我们的相机（避免 SwiftUI 重绘时丢失）
         if uiView.pointOfView !== viewModel.scene.cameraNode {
             uiView.pointOfView = viewModel.scene.cameraNode
+        }
+
+        let flags = RenderQualityManager.shared.featureFlags
+        if uiView.antialiasingMode != flags.antialiasingMode {
+            uiView.antialiasingMode = flags.antialiasingMode
+        }
+        let targetFPS = min(flags.maxFPS, UIScreen.main.maximumFramesPerSecond)
+        if uiView.preferredFramesPerSecond != targetFPS {
+            uiView.preferredFramesPerSecond = targetFPS
         }
     }
     
@@ -76,29 +84,11 @@ struct BilliardSceneView: UIViewRepresentable {
         twoFingerPan.maximumNumberOfTouches = 2
         view.addGestureRecognizer(twoFingerPan)
         
-        // 双击 - 切换视角
-        let doubleTap = UITapGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleDoubleTap(_:))
-        )
-        doubleTap.numberOfTapsRequired = 2
-        view.addGestureRecognizer(doubleTap)
-        
-        // 双指双击 - 快速回中/全台观察
-        let twoFingerDoubleTap = UITapGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleTwoFingerDoubleTap(_:))
-        )
-        twoFingerDoubleTap.numberOfTapsRequired = 2
-        twoFingerDoubleTap.numberOfTouchesRequired = 2
-        view.addGestureRecognizer(twoFingerDoubleTap)
-        
         // 单击 - 选择/确认
         let singleTap = UITapGestureRecognizer(
             target: context.coordinator,
             action: #selector(Coordinator.handleSingleTap(_:))
         )
-        singleTap.require(toFail: doubleTap)
         view.addGestureRecognizer(singleTap)
         
         // 长按手势已移除 — 力度通过右侧滑条控制
@@ -108,9 +98,11 @@ struct BilliardSceneView: UIViewRepresentable {
     
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var viewModel: BilliardSceneViewModel
+        private let inputRouter = InputRouter()
         
         private var lastPanLocation: CGPoint = .zero
         private var isDraggingCueBall: Bool = false
+        private var panStartHit: HitResult = .none
         
         /// HUD 控件所在的屏幕边缘宽度（左侧打点器、右侧力度条）
         private let hudEdgeMargin: CGFloat = 130
@@ -120,6 +112,7 @@ struct BilliardSceneView: UIViewRepresentable {
         private weak var scnView: SCNView?
         private var lastTimestamp: CFTimeInterval?
         private var lastAimLineUpdateTimestamp: CFTimeInterval = 0
+        private var lastAppliedRenderTier: RenderTier?
         
         private enum PanAxisLock {
             case undecided
@@ -143,6 +136,8 @@ struct BilliardSceneView: UIViewRepresentable {
         /// 启动渲染循环更新
         func startRenderLoop(for view: SCNView) {
             scnView = view
+            lastAppliedRenderTier = nil
+            applyRenderQualityIfNeeded(force: true)
             displayLink = CADisplayLink(target: self, selector: #selector(renderUpdate))
             displayLink?.add(to: .main, forMode: .common)
         }
@@ -152,10 +147,25 @@ struct BilliardSceneView: UIViewRepresentable {
             displayLink?.invalidate()
             displayLink = nil
             lastTimestamp = nil
+            lastAppliedRenderTier = nil
+        }
+
+        private func applyRenderQualityIfNeeded(force: Bool = false) {
+            guard let view = scnView else { return }
+            let manager = RenderQualityManager.shared
+            let tier = manager.currentTier
+            guard force || tier != lastAppliedRenderTier else { return }
+
+            let flags = manager.featureFlags
+            view.antialiasingMode = flags.antialiasingMode
+            view.preferredFramesPerSecond = min(flags.maxFPS, UIScreen.main.maximumFramesPerSecond)
+            viewModel.scene.reapplyRenderSettings()
+            lastAppliedRenderTier = tier
         }
         
         @objc private func renderUpdate() {
             let now = displayLink?.timestamp ?? CACurrentMediaTime()
+            viewModel.syncRenderQualityState()
             
             // 轨迹回放：逐帧驱动球位置（必须在 shadow/camera 更新之前）
             viewModel.updateTrajectoryPlaybackFrame(timestamp: now)
@@ -167,11 +177,12 @@ struct BilliardSceneView: UIViewRepresentable {
             if let last = lastTimestamp {
                 let dt = max(1.0 / 240.0, min(1.0 / 20.0, now - last))
                 deltaTime = Float(dt)
-                RenderQualityManager.shared.recordFrameTime(dt)
+                _ = RenderQualityManager.shared.recordFrameTime(dt)
             } else {
                 deltaTime = 1.0 / 60.0
             }
             lastTimestamp = now
+            applyRenderQualityIfNeeded()
 
             let isTopDown = viewModel.scene.currentCameraMode == .topDown2D
             let camState = viewModel.scene.cameraStateMachine.currentState
@@ -188,19 +199,22 @@ struct BilliardSceneView: UIViewRepresentable {
                     cueBallPosition: cueCenter
                 )
 
-                if (camState == .aiming || camState == .adjusting), let view = scnView {
+                let shouldForceCenterCueBall = viewModel.shouldForceCueBallScreenCentering(at: now)
+                if ((camState == .aiming || camState == .adjusting) && viewModel.gameState == .aiming) || shouldForceCenterCueBall,
+                   let view = scnView {
                     viewModel.scene.lockCueBallScreenAnchor(
                         in: view,
                         cueBallWorld: cueCenter,
-                        anchorNormalized: CGPoint(x: 0.5, y: 0.5)
+                        anchorNormalized: CGPoint(x: 0.5, y: 0.5),
+                        force: shouldForceCenterCueBall
                     )
                 }
             }
 
             viewModel.pitchAngle = viewModel.scene.cameraNode.eulerAngles.x
             
-            // 更新球杆位置（含碰撞检测仰角）— pullBack 由力度条驱动
-            if viewModel.gameState == .aiming {
+            // 更新球杆位置（含碰撞检测仰角）— 瞄准/观察视角均显示
+            if viewModel.gameState == .aiming && !isTopDown {
                 let pullBack = (viewModel.currentPower / 100.0) * CueStickSettings.maxPullBack
                 let elevation = CueStick.calculateRequiredElevation(
                     cueBallPosition: cueCenter,
@@ -219,10 +233,14 @@ struct BilliardSceneView: UIViewRepresentable {
             // 更新瞄准线和轨迹预测（2D 俯视模式下不显示）
             if viewModel.gameState == .aiming && !isTopDown {
                 if now - lastAimLineUpdateTimestamp >= (1.0 / 45.0) {
+                    let aimLineLen = viewModel.scene.calculateAimLineLength(
+                        from: cueCenter,
+                        direction: viewModel.aimDirection
+                    )
                     viewModel.scene.showAimLine(
                         from: cueCenter,
                         direction: viewModel.aimDirection,
-                        length: AimingSystem.maxAimLineLength
+                        length: aimLineLen
                     )
                     lastAimLineUpdateTimestamp = now
                 }
@@ -247,131 +265,130 @@ struct BilliardSceneView: UIViewRepresentable {
         
         // MARK: - Gesture Handlers
         
+        private func canPlaceCueBallDrag() -> Bool { viewModel.gameState == .placing }
+        
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard let view = gesture.view as? SCNView else { return }
             let translation = gesture.translation(in: view)
             if gesture.state == .began {
                 panAxisLock = .undecided
+                panStartHit = hitResult(at: gesture.location(in: view), in: view)
             }
 
-            // 2D 俯视模式：单指拖动平移视图
-            if viewModel.scene.currentCameraMode == .topDown2D {
-                if gesture.state == .changed {
-                    viewModel.scene.applyCameraPan(
-                        deltaX: Float(translation.x),
-                        deltaY: Float(translation.y)
-                    )
-                }
-                gesture.setTranslation(.zero, in: view)
-                return
-            }
-            
-            let camSM = viewModel.scene.cameraStateMachine
-
-            switch viewModel.gameState {
-            case .placing:
-                switch gesture.state {
-                case .began:
-                    let location = gesture.location(in: view)
-                    let hitResults = view.hitTest(location, options: [.searchMode: SCNHitTestSearchMode.closest.rawValue])
-                    isDraggingCueBall = hitResults.contains { $0.node.name == "cueBall" || $0.node.parent?.name == "cueBall" }
-                case .changed:
-                    if isDraggingCueBall {
-                        handlePlacingPan(gesture: gesture, in: view)
-                    }
-                case .ended, .cancelled:
-                    isDraggingCueBall = false
-                default:
-                    break
-                }
-                
-            case .aiming:
-                if gesture.state == .changed {
-                    if panAxisLock == .undecided {
-                        let absX = abs(translation.x)
-                        let absY = abs(translation.y)
-                        let threshold: CGFloat = 4
-                        if absX > threshold || absY > threshold {
-                            panAxisLock = absX >= absY ? .horizontal : .vertical
-                            if panAxisLock == .vertical {
-                                camSM.handleEvent(.verticalSwipeBegan)
-                            }
-                        }
-                    }
-                    
-                    let lockedDX: Float
-                    let lockedDY: Float
-                    switch panAxisLock {
-                    case .horizontal:
-                        lockedDX = Float(translation.x)
-                        lockedDY = 0
-                    case .vertical:
-                        lockedDX = 0
-                        lockedDY = Float(translation.y)
-                    case .undecided:
-                        lockedDX = 0
-                        lockedDY = 0
-                    }
-                    
-                    if lockedDX != 0, let aimCtrl = viewModel.scene.aimingController,
-                       let cueBall = viewModel.scene.cueBallNode {
-                        let cueBallPos = viewModel.scene.visualCenter(of: cueBall)
-                        let targetPositions = viewModel.scene.targetBallPositions()
-                        viewModel.aimDirection = aimCtrl.handleHorizontalSwipe(
-                            delta: lockedDX,
-                            currentAimDirection: viewModel.aimDirection,
-                            cueBallPos: cueBallPos,
-                            targetBalls: targetPositions
-                        )
-                        viewModel.updateTrajectoryPreview()
-                    }
-
-                    if lockedDY != 0 {
-                        viewModel.scene.viewTransitionController?.handleVerticalSwipe(delta: -lockedDY)
-                    }
-                }
-                
-            case .ballsMoving, .turnEnd, .idle:
-                if gesture.state == .changed {
-                    if camSM.currentState == .observing {
-                        viewModel.scene.observationController?.handleObservationPan(
-                            deltaX: Float(translation.x),
-                            deltaY: Float(translation.y)
-                        )
-                    } else {
-                        viewModel.scene.applyCameraPan(
-                            deltaX: Float(translation.x),
-                            deltaY: Float(translation.y)
-                        )
-                    }
+            if gesture.state == .began {
+                let beginIntent = inputRouter.routePan(
+                    startHit: panStartHit,
+                    input: PanGestureInput(deltaX: 0, deltaY: 0),
+                    context: viewModel.cameraContext
+                )
+                if beginIntent == .dragCueBall {
+                    isDraggingCueBall = true
+                    viewModel.beginCueBallDrag()
                 }
             }
-            
+
+            if gesture.state == .changed {
+                let intent = inputRouter.routePan(
+                    startHit: panStartHit,
+                    input: PanGestureInput(deltaX: Float(translation.x), deltaY: Float(translation.y)),
+                    context: viewModel.cameraContext
+                )
+                applyPanIntent(intent, gesture: gesture, view: view)
+            }
+
             if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed {
-                if panAxisLock == .vertical {
-                    camSM.handleEvent(.verticalSwipeEnded)
+                if isDraggingCueBall {
+                    isDraggingCueBall = false
+                    viewModel.endCueBallDrag()
+                }
+                if viewModel.cameraContext.interaction == .rotatingCamera {
+                    viewModel.cameraContext.interaction = .none
                 }
                 panAxisLock = .undecided
+                panStartHit = .none
             }
             
             gesture.setTranslation(.zero, in: view)
         }
+
+        private func applyPanIntent(_ intent: CameraIntent, gesture: UIPanGestureRecognizer, view: SCNView) {
+            switch intent {
+            case .none:
+                return
+            case .dragCueBall:
+                handlePlacingPan(gesture: gesture, in: view)
+            case .rotateYaw(let deltaX):
+                guard viewModel.gameState == .aiming,
+                      let aimCtrl = viewModel.scene.aimingController,
+                      let cueBall = viewModel.scene.cueBallNode else { return }
+                let cueBallPos = viewModel.scene.visualCenter(of: cueBall)
+                let targetPositions = viewModel.scene.targetBallPositions()
+                viewModel.aimDirection = aimCtrl.handleHorizontalSwipe(
+                    delta: deltaX,
+                    currentAimDirection: viewModel.aimDirection,
+                    cueBallPos: cueBallPos,
+                    targetBalls: targetPositions
+                )
+                viewModel.updateTrajectoryPreview()
+            case .rotateYawPitch(let deltaX, let deltaY):
+                viewModel.cameraContext.interaction = .rotatingCamera
+                if viewModel.selectedNextTarget != nil,
+                   let aimCtrl = viewModel.scene.aimingController,
+                   let cueBall = viewModel.scene.cueBallNode {
+                    let cueBallPos = viewModel.scene.visualCenter(of: cueBall)
+                    let targetPositions = viewModel.scene.targetBallPositions()
+                    viewModel.aimDirection = aimCtrl.handleHorizontalSwipe(
+                        delta: deltaX,
+                        currentAimDirection: viewModel.aimDirection,
+                        cueBallPos: cueBallPos,
+                        targetBalls: targetPositions
+                    )
+                    viewModel.scene.setAimDirectionForCamera(viewModel.aimDirection)
+                    viewModel.updateTrajectoryPreview()
+                    if abs(deltaY) > 0.0001 {
+                        viewModel.scene.observationController?.handleObservationPan(deltaX: 0, deltaY: deltaY)
+                    }
+                } else {
+                    viewModel.scene.observationController?.handleObservationPan(deltaX: deltaX, deltaY: deltaY)
+                }
+            case .panTopDown(let deltaX, let deltaY):
+                viewModel.scene.applyCameraPan(deltaX: deltaX, deltaY: deltaY)
+            case .zoom, .selectTarget:
+                break
+            }
+        }
         
         /// 处理母球摆放拖动：射线投射到台面平面，直接定位白球
         private func handlePlacingPan(gesture: UIPanGestureRecognizer, in view: SCNView) {
-            guard let cueBall = viewModel.scene.cueBallNode else { return }
+            guard viewModel.scene.cueBallNode != nil else { return }
             let location = gesture.location(in: view)
 
             let surfaceY = TablePhysics.height + BallPhysics.radius
             guard let worldPos = unprojectToTablePlane(screenPoint: location, in: view, planeY: surfaceY) else { return }
 
             var newX = worldPos.x
-            let newZ = worldPos.z
+            var newZ = worldPos.z
+
+            let R = BallPhysics.radius
+            let halfL = TablePhysics.innerLength / 2
+            let halfW = TablePhysics.innerWidth / 2
+
+            // 依据当前相机缩放自适应拖动灵敏度，避免高视角下拖动过猛
+            let zoom = viewModel.scene.currentCameraZoom
+            let dragScale = max(0.35, min(0.85, 0.35 + zoom * 0.5))
+            if let cueBall = viewModel.scene.cueBallNode {
+                let cuePos = viewModel.scene.visualCenter(of: cueBall)
+                newX = cuePos.x + (newX - cuePos.x) * dragScale
+                newZ = cuePos.z + (newZ - cuePos.z) * dragScale
+            }
 
             if viewModel.placingBehindHeadString {
                 let headStringX = BilliardScene.headStringX
-                newX = headStringX >= 0 ? max(newX, headStringX) : min(newX, headStringX)
+                newX = max(headStringX, min(halfL - R, newX))
+            } else {
+                newX = max(-halfL + R, min(halfL - R, newX))
             }
+            newZ = max(-halfW + R, min(halfW - R, newZ))
 
             let targetPos = SCNVector3(newX, surfaceY, newZ)
             viewModel.scene.moveCueBall(to: targetPos)
@@ -409,17 +426,36 @@ struct BilliardSceneView: UIViewRepresentable {
                 return
             }
 
+            if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed {
+                if viewModel.cameraContext.interaction == .rotatingCamera {
+                    viewModel.cameraContext.interaction = .none
+                }
+                return
+            }
             guard gesture.state == .changed else { return }
-            viewModel.scene.applyCameraPinch(scale: Float(gesture.scale))
-            if viewModel.gameState == .aiming && viewModel.scene.shouldLinkAimDirectionWithCamera() {
-                viewModel.aimDirection = viewModel.scene.currentAimDirectionFromCamera()
-                viewModel.updateTrajectoryPreview()
+            let intent = inputRouter.routePinch(scale: Float(gesture.scale), context: viewModel.cameraContext)
+            if case .zoom(let scale) = intent {
+                if viewModel.cameraContext.mode == .observe3D {
+                    viewModel.cameraContext.interaction = .rotatingCamera
+                    viewModel.scene.observationController?.handleObservationPinch(scale: scale)
+                } else {
+                    viewModel.scene.applyCameraPinch(scale: scale)
+                    if viewModel.gameState == .aiming && viewModel.scene.shouldLinkAimDirectionWithCamera() {
+                        viewModel.aimDirection = viewModel.scene.currentAimDirectionFromCamera()
+                        viewModel.updateTrajectoryPreview()
+                    }
+                }
             }
             gesture.scale = 1.0
         }
         
         @objc func handleTwoFingerPan(_ gesture: UIPanGestureRecognizer) {
             guard gesture.state == .changed else { return }
+            guard viewModel.cameraContext.mode == .topDown2D else { return }
+            if viewModel.cameraContext.transition?.isActive == true,
+               viewModel.cameraContext.transition?.locksCameraInput == true {
+                return
+            }
             let translation = gesture.translation(in: gesture.view)
             viewModel.scene.applyCameraPan(deltaX: Float(translation.x), deltaY: Float(translation.y))
             
@@ -427,34 +463,111 @@ struct BilliardSceneView: UIViewRepresentable {
         }
         
         @objc func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
-            // 循环切换视角
-            viewModel.cycleNextCameraMode()
+            // 双击切换路径已禁用，避免与按钮交互重复并造成误触跳变
         }
         
         @objc func handleTwoFingerDoubleTap(_ gesture: UITapGestureRecognizer) {
-            viewModel.toggleViewMode()
+            // 双指双击切换路径已禁用，保留空实现兼容历史入口
         }
         
         @objc func handleSingleTap(_ gesture: UITapGestureRecognizer) {
             guard viewModel.scene.currentCameraMode != .topDown2D else { return }
             guard let view = gesture.view as? SCNView else { return }
+            if viewModel.cameraContext.transition?.isActive == true,
+               viewModel.cameraContext.transition?.locksCameraInput == true {
+                return
+            }
             let location = gesture.location(in: view)
             
-            // 母球摆放模式：点击确认放置
             if viewModel.gameState == .placing {
                 viewModel.confirmCueBallPlacement()
                 return
             }
             
-            // 命中测试
+            // 先尝试 SceneKit hitTest
             let hitResults = view.hitTest(location, options: [
                 .searchMode: SCNHitTestSearchMode.closest.rawValue
             ])
             
-            if let hit = hitResults.first {
-                let node = viewModel.findBallAncestor(hit.node) ?? hit.node
-                viewModel.handleTap(on: node, at: hit.localCoordinates)
+            if !hitResults.isEmpty {
+                for hit in hitResults {
+                    let node = viewModel.findBallAncestor(hit.node) ?? hit.node
+                    if node.name == "cueBall" || (node.name != nil && viewModel.isTargetBallName(node.name!)) {
+                        let hitResult = makeBallHitResult(node: node)
+                        let intent = inputRouter.routeTap(hit: hitResult, context: viewModel.cameraContext)
+                        if case .selectTarget = intent {
+                            viewModel.handleTap(on: node, at: hit.localCoordinates)
+                            return
+                        }
+                        if hitResult.isCueBall {
+                            viewModel.handleTap(on: node, at: hit.localCoordinates)
+                        }
+                        return
+                    }
+                }
             }
+            
+            // 距离兜底：投影到台面找最近的球（包含白球，便于重复摆放）
+            let surfaceY = TablePhysics.height + BallPhysics.radius
+            guard let worldPos = unprojectToTablePlane(screenPoint: location, in: view, planeY: surfaceY) else { return }
+            let threshold: Float = BallPhysics.radius * 4.0
+            
+            var closestBall: SCNNode? = nil
+            var closestDist: Float = threshold
+            if let cueBall = viewModel.scene.cueBallNode, cueBall.parent != nil {
+                let pos = viewModel.scene.visualCenter(of: cueBall)
+                let dx = pos.x - worldPos.x
+                let dz = pos.z - worldPos.z
+                let dist = sqrtf(dx * dx + dz * dz)
+                if dist < closestDist {
+                    closestDist = dist
+                    closestBall = cueBall
+                }
+            }
+            
+            for ball in viewModel.scene.targetBallNodes {
+                guard ball.parent != nil else { continue }
+                let pos = viewModel.scene.visualCenter(of: ball)
+                let dx = pos.x - worldPos.x
+                let dz = pos.z - worldPos.z
+                let dist = sqrtf(dx * dx + dz * dz)
+                if dist < closestDist {
+                    closestDist = dist
+                    closestBall = ball
+                }
+            }
+            
+            if let ball = closestBall {
+                let hitResult = makeBallHitResult(node: ball)
+                let intent = inputRouter.routeTap(hit: hitResult, context: viewModel.cameraContext)
+                if case .selectTarget = intent {
+                    viewModel.handleTap(on: ball, at: SCNVector3Zero)
+                    return
+                }
+                if hitResult.isCueBall {
+                    viewModel.handleTap(on: ball, at: SCNVector3Zero)
+                }
+            }
+        }
+
+        private func hitResult(at point: CGPoint, in view: SCNView) -> HitResult {
+            let hitResults = view.hitTest(point, options: [.searchMode: SCNHitTestSearchMode.closest.rawValue])
+            guard let first = hitResults.first else { return .none }
+            let node = viewModel.findBallAncestor(first.node) ?? first.node
+            return makeBallHitResult(node: node)
+        }
+
+        private func makeBallHitResult(node: SCNNode) -> HitResult {
+            guard let name = node.name else { return .none }
+            let isCueBall = (name == "cueBall")
+            let isTarget = viewModel.isTargetBallName(name)
+            return HitResult(
+                isUI: false,
+                isBall: isCueBall || isTarget,
+                isCueBall: isCueBall,
+                isTargetBall: isTarget,
+                ballId: isTarget ? name : nil
+            )
         }
         
     }
@@ -473,11 +586,22 @@ class BilliardSceneViewModel: ObservableObject {
     @Published var aimDirection: SCNVector3 = SCNVector3(1, 0, 0)
     @Published var selectedCuePoint: CGPoint = CGPoint(x: 0.5, y: 0.5)  // 打点位置 (0-1)
     @Published var isTopDownView: Bool = false  // 2D/3D 视角切换
+    @Published var isHighQuality: Bool = false   // 高/低画质切换
+    @Published var cameraContext: CameraContext = .default {
+        didSet {
+            isInObservationView = (cameraContext.mode == .observe3D)
+            scene.isPivotFollowLocked = cameraContext.pivotFollowLocked
+        }
+    }
     @Published var lastFouls: [Foul] = []
     @Published var lastShotLegal: Bool = true
+    @Published var selectionWarning: String? = nil
     
     /// Whether placing mode restricts cue ball to behind head string
     var placingBehindHeadString: Bool = false
+    
+    /// 目标球选择合法性验证回调：返回 (valid, errorMessage?)
+    var ballSelectionValidator: ((String) -> (valid: Bool, message: String?))? = nil
 
     /// 观察视角中用户点选的下一颗目标球
     private(set) var selectedNextTarget: SCNNode?
@@ -527,6 +651,10 @@ class BilliardSceneViewModel: ObservableObject {
     private var hasTriggeredObservation: Bool = false
     /// 无碰撞时的后备延迟（秒）
     private let observationFallbackDelay: Float = 0.8
+    /// 防止停球阈值附近抖动导致重复切 phase
+    private var lastBallsStoppedWallClock: CFTimeInterval = 0
+    /// 需要短时间强制把白球投影锁到屏幕中心（用于回合结束/首次选球）
+    private var forceCueBallCenteringUntil: CFTimeInterval = 0
 
     /// 轨迹预测节流与变化阈值缓存
     private var lastTrajectoryPreviewTimestamp: CFTimeInterval = 0
@@ -561,10 +689,13 @@ class BilliardSceneViewModel: ObservableObject {
     }
 
     var cameraState: LegacyCameraState {
-        if isTopDownView { return .topDown2D }
-        switch scene.cameraStateMachine.currentState {
-        case .observing: return .action
-        case .aiming, .adjusting, .shooting, .returnToAim: return .aim
+        switch cameraContext.mode {
+        case .topDown2D:
+            return .topDown2D
+        case .observe3D:
+            return .action
+        case .aim3D:
+            return .aim
         }
     }
 
@@ -573,9 +704,21 @@ class BilliardSceneViewModel: ObservableObject {
     init() {
         print("[BilliardSceneViewModel] init 开始...")
         scene = BilliardScene()
+        isHighQuality = (RenderQualityManager.shared.currentTier == .high)
+        cameraContext = .default
+        isInObservationView = false
         
         scene.onCameraModeChanged = { [weak self] mode in
-            self?.isTopDownView = (mode == .topDown2D)
+            guard let self = self else { return }
+            self.isTopDownView = (mode == .topDown2D)
+            if mode == .topDown2D {
+                self.cameraContext.mode = .topDown2D
+            } else if self.cameraContext.mode == .topDown2D {
+                self.cameraContext.mode = .aim3D
+            }
+        }
+        scene.cameraContextProvider = { [weak self] in
+            self?.cameraContext ?? .default
         }
 
         scene.cameraStateMachine.onStateChanged = { [weak self] oldState, newState in
@@ -585,10 +728,23 @@ class BilliardSceneViewModel: ObservableObject {
         
         print("[BilliardSceneViewModel] init 完成")
     }
+
+    /// 与 RenderQualityManager 同步，避免自动降级后 UI 状态不一致
+    func syncRenderQualityState() {
+        let isManagerHigh = (RenderQualityManager.shared.currentTier == .high)
+        if isHighQuality != isManagerHigh {
+            isHighQuality = isManagerHigh
+        }
+    }
     
     /// 所有球停止运动后的处理（由 SCNAction 播放完成触发）
     private func onBallsAtRest() {
         guard gameState == .ballsMoving else { return }
+        let now = CACurrentMediaTime()
+        if now - lastBallsStoppedWallClock < 0.12 {
+            return
+        }
+        lastBallsStoppedWallClock = now
         
         // 规则判定
         let result = EightBallRules.isLegalShot(events: shotEvents, currentGroup: currentGroup)
@@ -612,13 +768,17 @@ class BilliardSceneViewModel: ObservableObject {
         
         // 先进入回合结束状态
         gameState = .turnEnd
+        cameraContext.phase = .postShot
 
         // 通知摄像状态机：球停止
         scene.cameraStateMachine.handleEvent(.ballsStopped)
+        requestCueBallScreenCentering(duration: 1.1)
     }
 
     /// 处理摄像状态机转换
     private func handleCameraStateTransition(from oldState: CameraState, to newState: CameraState) {
+        syncContextPhaseWithCameraState(newState)
+
         switch newState {
         case .aiming:
             if oldState == .returnToAim {
@@ -637,6 +797,11 @@ class BilliardSceneViewModel: ObservableObject {
                 scene.setAimDirectionForCamera(aimDirection)
             }
         case .returnToAim:
+            if selectedNextTarget != nil {
+                scene.cameraStateMachine.forceState(.observing)
+                cameraContext.mode = .observe3D
+                return
+            }
             if !isTopDownView, let cueBall = scene.cueBallNode {
                 let cueBallPos = scene.visualCenter(of: cueBall)
                 var targetDir: SCNVector3?
@@ -657,6 +822,22 @@ class BilliardSceneViewModel: ObservableObject {
         default:
             break
         }
+    }
+
+    private func syncContextPhaseWithCameraState(_ state: CameraState) {
+        var updated = cameraContext
+        switch state {
+        case .aiming, .adjusting:
+            updated.phase = .aiming
+        case .shooting, .observing:
+            updated.phase = .shotRunning
+        case .returnToAim:
+            updated.phase = .postShot
+        }
+        if updated.mode != .topDown2D {
+            updated.mode = (state == .observing) ? .observe3D : .aim3D
+        }
+        cameraContext = updated
     }
 
     /// 白球当前位置的便利属性
@@ -702,6 +883,7 @@ class BilliardSceneViewModel: ObservableObject {
         }
         
         gameState = .aiming
+        cameraContext.phase = .aiming
         print("[BilliardSceneViewModel] ✅ setupTrainingScene 完成")
     }
     
@@ -784,18 +966,24 @@ class BilliardSceneViewModel: ObservableObject {
         if scene.cueBallNode == nil || scene.cueBallNode?.parent == nil {
             scene.restoreCueBall()
             gameState = .placing
+            cameraContext.phase = .ballPlacement
         } else {
             gameState = .aiming
+            cameraContext.phase = .aiming
         }
         
         pitchAngle = scene.cameraNode.eulerAngles.x
+
+        setupCueStick()
+        if gameState == .aiming {
+            cueStick?.show()
+        }
 
         let camState = scene.cameraStateMachine.currentState
         if camState == .observing || camState == .returnToAim {
             return
         }
         
-        setupCueStick()
         if !isTopDownView {
             transitionToAimState(animated: true)
         } else {
@@ -945,6 +1133,9 @@ class BilliardSceneViewModel: ObservableObject {
         print("[StrokeDebug] aimUnit=\(aimUnit), velUnit=\(velUnit), alignmentDot=\(alignmentDot)")
         
         // 2. 隐藏瞄准线、轨迹预测；播放球杆前冲击球动画
+        cameraContext.mode = .aim3D
+        cameraContext.phase = .shotRunning
+        cameraContext.interaction = .none
         scene.hideAimLine()
         scene.hidePredictedTrajectory()
         scene.hideGhostBall()
@@ -1011,8 +1202,12 @@ class BilliardSceneViewModel: ObservableObject {
         lastShotRecorder = recorder
         
         // 7. 通知状态机：击球
+        updateObservationFocusByBestEffort()
         scene.cameraStateMachine.saveAimContext(aimDirection: aimDirection, zoom: scene.currentCameraZoom)
         scene.cameraStateMachine.handleEvent(.shotFired)
+        if let shotPose = scene.captureCurrentCameraPose() {
+            cameraContext.shotAnchorPose = shotPose
+        }
 
         gameState = .ballsMoving
         saveAimCameraMemory()
@@ -1191,8 +1386,24 @@ class BilliardSceneViewModel: ObservableObject {
         toggleViewMode()
     }
     
+    /// 切换高/低画质
+    func toggleRenderQuality() {
+        syncRenderQualityState()
+        isHighQuality.toggle()
+        let tier: RenderTier = isHighQuality ? .high : .low
+        RenderQualityManager.shared.setTier(tier)
+        scene.reapplyRenderSettings()
+    }
+
     /// 2D/3D 视角切换
     func toggleViewMode() {
+        cameraContext.transition = TransitionState(isActive: true, locksCameraInput: true)
+        let unlockDelay = 0.55
+        DispatchQueue.main.asyncAfter(deadline: .now() + unlockDelay) { [weak self] in
+            guard let self = self else { return }
+            self.cameraContext.transition = TransitionState(isActive: false, locksCameraInput: false)
+        }
+
         let shouldEnterTopDown = scene.currentCameraMode != .topDown2D
         if shouldEnterTopDown {
             enterTopDownState(animated: true)
@@ -1205,13 +1416,79 @@ class BilliardSceneViewModel: ObservableObject {
         }
     }
     
+    // MARK: - View Switching (Observation / Aiming)
+    
+    @Published private(set) var isInObservationView: Bool = false
+
+    private enum CameraTrajectoryMode {
+        case observation
+        case aiming
+    }
+
+    private func applyCameraTrajectory(
+        _ mode: CameraTrajectoryMode,
+        animated: Bool,
+        speed: Float = TrainingCameraConfig.cameraTransitionSpeed
+    ) {
+        guard let cameraRig = scene.cameraRig else { return }
+        guard let cueBall = scene.cueBallNode else { return }
+        let cueBallPos = scene.visualCenter(of: cueBall)
+        let flatAim = SCNVector3(aimDirection.x, 0, aimDirection.z).normalized()
+        let alignedYaw = atan2f(-flatAim.z, -flatAim.x)
+
+        switch mode {
+        case .observation:
+            cameraRig.targetPivot = SCNVector3(cueBallPos.x, TablePhysics.height, cueBallPos.z)
+            cameraRig.targetYaw = alignedYaw
+            cameraRig.pushToObservation(animated: animated)
+            scene.cameraStateMachine.forceState(.observing)
+            cameraContext.mode = .observe3D
+            cameraContext.phase = (gameState == .placing) ? .ballPlacement : .aiming
+        case .aiming:
+            cameraRig.targetPivot = SCNVector3(cueBallPos.x, TablePhysics.height, cueBallPos.z)
+            cameraRig.targetYaw = alignedYaw
+            cameraRig.returnToAim(zoom: 0, animated: animated)
+            scene.cameraStateMachine.forceState(.aiming)
+            cameraContext.mode = .aim3D
+            cameraContext.phase = .aiming
+        }
+
+        if animated {
+            cameraRig.beginConstantSpeedTransition(speed: speed)
+        } else {
+            cameraRig.snapToTarget()
+        }
+    }
+    
+    /// 切换到观察视角（瞄准状态下）：zoom 升高、pivot 到球桌中心、保持当前瞄准方向
+    func switchToObservationView() {
+        guard gameState == .aiming, !isTopDownView else { return }
+        scene.setAimDirectionForCamera(aimDirection)
+        applyCameraTrajectory(.observation, animated: true, speed: TrainingCameraConfig.cameraTransitionSpeed)
+    }
+    
+    /// 切换到瞄准视角（第一人称）：zoom 降到 0、pivot 回到白球
+    func switchToAimingView() {
+        guard gameState == .aiming, !isTopDownView else { return }
+        scene.setAimDirectionForCamera(aimDirection)
+        applyCameraTrajectory(.aiming, animated: true, speed: TrainingCameraConfig.cameraTransitionSpeed)
+    }
+    
     // MARK: - Event Handlers
     
     /// 处理点击事件
     func handleTap(on node: SCNNode, at localCoordinates: SCNVector3) {
         let camState = scene.cameraStateMachine.currentState
 
-        if let name = node.name, isTargetBallName(name), camState == .observing {
+        if node.name == "cueBall" && gameState == .aiming {
+            // 支持再次选中白球进入放置模式重复移动
+            enterPlacingMode(behindHeadString: placingBehindHeadString)
+        } else if let name = node.name, isTargetBallName(name),
+                  (camState == .observing || camState == .returnToAim) {
+            if let validation = ballSelectionValidator?(name), !validation.valid {
+                showSelectionWarning(validation.message ?? "不能选择此球")
+                return
+            }
             selectNextTargetAndReturn(node)
         } else if node.name == "cueBall" && gameState == .idle {
             gameState = .aiming
@@ -1220,6 +1497,10 @@ class BilliardSceneViewModel: ObservableObject {
                 transitionToAimState(animated: true)
             }
         } else if let name = node.name, isTargetBallName(name), gameState == .aiming, camState == .aiming {
+            if let validation = ballSelectionValidator?(name), !validation.valid {
+                showSelectionWarning(validation.message ?? "不能选择此球")
+                return
+            }
             guard let cueBall = scene.cueBallNode else { return }
             let target = scene.visualCenter(of: node)
             let pockets = scene.pockets()
@@ -1237,20 +1518,68 @@ class BilliardSceneViewModel: ObservableObject {
                 scene.showGhostBall(at: ghost)
                 aimDirection = (ghost - scene.visualCenter(of: cueBall)).normalized()
                 scene.setAimDirectionForCamera(aimDirection)
+                updateObservationFocusContext(for: node)
             } else {
                 scene.hideGhostBall()
+                clearObservationFocusContext()
             }
         }
     }
 
-    /// 观察视角中选择下一颗目标球，并触发回归瞄准
+    /// 显示选球警告，自动消失
+    private func showSelectionWarning(_ message: String) {
+        selectionWarning = message
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            if self?.selectionWarning == message {
+                self?.selectionWarning = nil
+            }
+        }
+    }
+
+    /// 观察视角中选择下一颗目标球，保持观察态并允许继续重选
     private func selectNextTargetAndReturn(_ node: SCNNode) {
+        guard gameState != .ballsMoving else {
+            showSelectionWarning("请等待球停止后再选择目标球")
+            return
+        }
+        let isInitialSelection = (selectedNextTarget == nil)
+
+        // 与“观察按钮”路径保持一致：进入可瞄准阶段，确保球杆与瞄准线可见。
+        if gameState != .aiming {
+            gameState = .aiming
+            cameraContext.phase = .aiming
+            if cueStick == nil {
+                setupCueStick()
+            }
+            cueStick?.show()
+        }
+
         if let prev = selectedNextTarget {
             scene.removeSelectionHighlight(from: prev)
         }
         selectedNextTarget = node
         scene.addSelectionHighlight(to: node)
-        scene.cameraStateMachine.handleEvent(.targetSelected)
+        updateObservationFocusContext(for: node)
+
+        guard let cueBall = scene.cueBallNode,
+              let targetPos = cameraContext.observeTargetBallPosition else { return }
+        let cuePos = scene.visualCenter(of: cueBall)
+        let nextAim = (targetPos - cuePos).normalized()
+        guard nextAim.length() > 0.0001 else { return }
+
+        aimDirection = nextAim
+        scene.setAimDirectionForCamera(nextAim)
+
+        if cameraContext.mode == .observe3D, !isTopDownView {
+            scene.observationController?.focusOnSelection(
+                cueBallPosition: cuePos,
+                targetPosition: targetPos,
+                aimDirection: nextAim
+            )
+        }
+        if isInitialSelection {
+            requestCueBallScreenCentering(duration: 0.7)
+        }
     }
 
     /// 清除目标球选择
@@ -1264,15 +1593,22 @@ class BilliardSceneViewModel: ObservableObject {
     /// 确认母球放置
     func confirmCueBallPlacement() {
         guard gameState == .placing else { return }
+        clearNextTargetSelection()
+        clearObservationFocusContext()
+        cameraContext.pivotFollowLocked = false
+        cameraContext.interaction = .none
         gameState = .aiming
         cueStick?.show()
         if !isTopDownView {
-            transitionToAimState(animated: true)
+            switchToObservationView()
         }
     }
     
     /// Enter placing mode with optional head-string restriction
     func enterPlacingMode(behindHeadString: Bool = false) {
+        let wasIdle = (gameState == .idle)
+        clearNextTargetSelection()
+        clearObservationFocusContext()
         shotEvents.removeAll()
         currentPower = 0
         selectedCuePoint = CGPoint(x: 0.5, y: 0.5)
@@ -1291,16 +1627,138 @@ class BilliardSceneViewModel: ObservableObject {
         aimDirection = SCNVector3(-1, 0, 0)
         pitchAngle = scene.cameraNode.eulerAngles.x
         gameState = .placing
+        cameraContext.phase = .ballPlacement
+        cameraContext.pivotAnchor = .cueBall
         
+        let shouldAnimate = !wasIdle
         if scene.currentCameraMode == .topDown2D {
             enterTopDownState(animated: false)
         } else {
-            transitionToAimState(animated: true)
+            transitionToPlacingObservation(animated: shouldAnimate)
+        }
+    }
+    
+    /// 进入白球摆放的观察视角：从白球靠近的短边方向俯视
+    private func transitionToPlacingObservation(animated: Bool) {
+        guard let cameraRig = scene.cameraRig,
+              let cueBall = scene.cueBallNode else {
+            transitionToAimState(animated: animated)
+            return
+        }
+        // 开球放置视角：从近端短库边看向远端（-X），符合真实站位
+        let nearToFarDir = SCNVector3(-1, 0, 0)
+        aimDirection = nearToFarDir
+        let shortEdgeYaw: Float = atan2f(-nearToFarDir.z, -nearToFarDir.x)
+        let cuePos = scene.visualCenter(of: cueBall)
+        cameraRig.targetPivot = SCNVector3(cuePos.x, TablePhysics.height, cuePos.z)
+        cameraRig.targetYaw = shortEdgeYaw
+        cameraRig.pushToObservation(animated: animated)
+        if animated {
+            cameraRig.beginConstantSpeedTransition(speed: TrainingCameraConfig.cameraTransitionSpeed)
+        } else {
+            cameraRig.snapToTarget()
+        }
+        cameraContext.mode = .observe3D
+        cameraContext.phase = .ballPlacement
+        cameraContext.pivotAnchor = .cueBall
+        scene.cameraStateMachine.forceState(.observing)
+    }
+
+    func beginCueBallDrag() {
+        guard gameState == .placing else { return }
+        cameraContext.pivotFollowLocked = true
+        cameraContext.interaction = .draggingCueBall
+    }
+
+    func endCueBallDrag() {
+        guard gameState == .placing else { return }
+        guard let cueBall = scene.cueBallNode else { return }
+
+        let cuePos = scene.visualCenter(of: cueBall)
+        if let rackFront = scene.targetBallNodes
+            .filter({ $0.parent != nil })
+            .min(by: { scene.visualCenter(of: $0).x < scene.visualCenter(of: $1).x }) {
+            let targetPos = scene.visualCenter(of: rackFront)
+            aimDirection = SCNVector3(targetPos.x - cuePos.x, 0, targetPos.z - cuePos.z).normalized()
+        }
+
+        gameState = .aiming
+        setupCueStick()
+        cueStick?.show()
+        scene.setAimDirectionForCamera(aimDirection)
+        applyCameraTrajectory(
+            .observation,
+            animated: true,
+            speed: TrainingCameraConfig.placingToAimTransitionSpeed
+        )
+
+        // 拖拽结束后先保持锁定，待回正动画结束再解锁，避免镜头跳变
+        cameraContext.interaction = .none
+        cameraContext.pivotFollowLocked = true
+        let unlockDelay = max(0.3, TrainingCameraConfig.transitionDuration)
+        DispatchQueue.main.asyncAfter(deadline: .now() + unlockDelay) { [weak self] in
+            guard let self = self else { return }
+            self.cameraContext.pivotFollowLocked = false
         }
     }
     
     private func saveAimCameraMemory() {
         scene.saveCurrentAimZoom()
+        if let pose = scene.captureCurrentCameraPose() {
+            cameraContext.savedAimPose = pose
+        }
+    }
+
+    private func requestCueBallScreenCentering(duration: CFTimeInterval) {
+        let deadline = CACurrentMediaTime() + max(0, duration)
+        forceCueBallCenteringUntil = max(forceCueBallCenteringUntil, deadline)
+    }
+
+    func shouldForceCueBallScreenCentering(at now: CFTimeInterval) -> Bool {
+        if now <= forceCueBallCenteringUntil {
+            return true
+        }
+        forceCueBallCenteringUntil = 0
+        return false
+    }
+
+    private func clearObservationFocusContext() {
+        cameraContext.observeTargetBallId = nil
+        cameraContext.observeTargetBallPosition = nil
+        cameraContext.observePocketId = nil
+        cameraContext.observePocketPosition = nil
+    }
+
+    private func updateObservationFocusContext(for targetNode: SCNNode) {
+        guard let targetName = targetNode.name,
+              scene.cueBallNode != nil else {
+            clearObservationFocusContext()
+            return
+        }
+        let targetPos = scene.visualCenter(of: targetNode)
+        cameraContext.observeTargetBallId = targetName
+        cameraContext.observeTargetBallPosition = targetPos
+        cameraContext.observePocketId = nil
+        cameraContext.observePocketPosition = nil
+    }
+
+    private func updateObservationFocusByBestEffort() {
+        if let selected = selectedNextTarget, selected.parent != nil {
+            updateObservationFocusContext(for: selected)
+            return
+        }
+        guard let cueBall = scene.cueBallNode else {
+            clearObservationFocusContext()
+            return
+        }
+        let cuePos = scene.visualCenter(of: cueBall)
+        guard let nearestTarget = scene.targetBallNodes
+            .filter({ $0.parent != nil })
+            .min(by: { (scene.visualCenter(of: $0) - cuePos).length() < (scene.visualCenter(of: $1) - cuePos).length() }) else {
+            clearObservationFocusContext()
+            return
+        }
+        updateObservationFocusContext(for: nearestTarget)
     }
     
     private func transitionToAimState(animated: Bool) {
@@ -1308,6 +1766,9 @@ class BilliardSceneViewModel: ObservableObject {
         scene.returnCameraToAim(animated: animated)
         scene.setAimDirectionForCamera(aimDirection)
         scene.cameraStateMachine.forceState(.aiming)
+        cameraContext.mode = .aim3D
+        cameraContext.phase = .aiming
+        cameraContext.pivotAnchor = .cueBall
     }
 
     private func enterTopDownState(animated: Bool) {
@@ -1315,6 +1776,8 @@ class BilliardSceneViewModel: ObservableObject {
         scene.hideAimLine()
         scene.hidePredictedTrajectory()
         isTopDownView = true
+        cameraContext.mode = .topDown2D
+        cameraContext.pivotAnchor = .tableCenter
     }
     
     func quickResetPlanningCamera() {

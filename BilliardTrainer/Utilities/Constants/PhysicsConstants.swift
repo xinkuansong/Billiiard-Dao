@@ -240,22 +240,21 @@ struct AimingSystem {
 struct TrainingCameraConfig {
     // MARK: FOV
     static let aimFov: CGFloat = 40        // 俯身瞄准 FOV
-    static let standFov: CGFloat = 30      // 站立观察 FOV（窄视角减少透视畸变）
-    static let fov: CGFloat = 30           // 兼容旧引用，取观察值
+    static let standFov: CGFloat = 36      // 站立观察 FOV：适度放宽，减少“贴脸”感
+    static let fov: CGFloat = 36           // 兼容旧引用，取观察值
 
     // MARK: zoom 范围（0=俯身瞄准，1=站立观察）
     static let minZoom: Float = 0.0
     static let maxZoom: Float = 1.0
 
     // MARK: 人体姿态约束 - 距离（相机到白球的水平距离）
-    static let aimRadius: Float = 0.8       // 俯身瞄准：0.5m
-    // 观察距离 d=3.0m, 水平分量 = d × cos(28°) ≈ 2.65m
-    static let standRadius: Float = 2.65    // 站立观察：2.65m
+    static let aimRadius: Float = 1.05      // 俯身瞄准：适当拉远，减轻压迫感
+    // 观察态默认拉远，保证桌面覆盖率与教学视角可读性
+    static let standRadius: Float = 1.55
 
     // MARK: 人体姿态约束 - 高度（相对台面的视线高度）
-    static let aimHeight: Float = 0.10      // 俯身瞄准：台面上方 0.10m（接近球面高度）
-    // 观察高度 = d × sin(28°) ≈ 1.41m
-    static let standHeight: Float = 1.41    // 站立观察：台面上方 1.41m
+    static let aimHeight: Float = 0.22      // 俯身瞄准：略抬高以提升可视性
+    static let standHeight: Float = 0.92    // 站立观察：略抬高，减少近端库边压迫感
 
     // MARK: 人体姿态约束 - 俯角
     static let aimPitchDeg: Float = -15     // 俯身瞄准俯角，接近水平
@@ -289,6 +288,9 @@ struct TrainingCameraConfig {
     static let returnToAimDuration: Float = 0.5
     static let transitionDuration: Double = 0.5
     static let cameraTransitionSpeed: Float = 3.0   // 摄像机过渡速度（米/秒），观察距离增大后提速保持合理过渡时长
+    static let placingToAimTransitionSpeed: Float = 3.2
+    static let topDownTransitionNarrowFov: CGFloat = 14
+    static let topDownTransitionWideFov: CGFloat = 16
 
     // MARK: 安全约束
     static let minHeightAboveTable: Float = 0.05

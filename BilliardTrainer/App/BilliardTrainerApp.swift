@@ -16,18 +16,18 @@ class OrientationHelper {
     
     /// 强制横屏
     static func forceLandscape() {
-        let targetOrientation = preferredLandscapeOrientation()
-        orientationMask = targetOrientation == .landscapeLeft ? .landscapeLeft : .landscapeRight
-        requestOrientationUpdate(targetOrientation)
+        // 使用 landscape 掩码而非单侧方向，避免过渡期 VC 方向约束不一致导致请求失败
+        orientationMask = .landscape
+        requestOrientationUpdate(.landscape)
     }
     
     /// 恢复竖屏
     static func restorePortrait() {
         orientationMask = .allButUpsideDown
-        requestOrientationUpdate(.portrait)
+        requestOrientationUpdate(.allButUpsideDown)
     }
     
-    private static func requestOrientationUpdate(_ orientation: UIInterfaceOrientation) {
+    private static func requestOrientationUpdate(_ targetMask: UIInterfaceOrientationMask) {
         guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene else { return }
         
         // 先通知 VC 更新 supportedInterfaceOrientations，再请求系统旋转
@@ -37,41 +37,11 @@ class OrientationHelper {
         if #unavailable(iOS 16.0) {
             UIViewController.attemptRotationToDeviceOrientation()
         }
-        
-        let targetMask: UIInterfaceOrientationMask
-        switch orientation {
-        case .landscapeLeft:
-            targetMask = .landscapeLeft
-        case .landscapeRight:
-            targetMask = .landscapeRight
-        case .portrait:
-            targetMask = .portrait
-        case .portraitUpsideDown:
-            targetMask = .portraitUpsideDown
-        default:
-            targetMask = orientationMask
-        }
-        
+
         let geometryPreferences = UIWindowScene.GeometryPreferences.iOS(interfaceOrientations: targetMask)
         windowScene.requestGeometryUpdate(geometryPreferences) { error in
-            print("[OrientationHelper] Geometry update error: \(error)")
-        }
-    }
-    
-    private static func preferredLandscapeOrientation() -> UIInterfaceOrientation {
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            if scene.interfaceOrientation == .landscapeLeft || scene.interfaceOrientation == .landscapeRight {
-                return scene.interfaceOrientation
-            }
-        }
-        
-        switch UIDevice.current.orientation {
-        case .landscapeLeft:
-            return .landscapeRight
-        case .landscapeRight:
-            return .landscapeLeft
-        default:
-            return .landscapeRight
+            // iOS 在场景过渡期间可能短暂拒绝方向请求；避免噪声日志影响排障
+            print("[OrientationHelper] Geometry update warning: \(error)")
         }
     }
 }

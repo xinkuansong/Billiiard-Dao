@@ -7,6 +7,158 @@
 
 import SceneKit
 
+enum CameraPresentationMode: Equatable {
+    case aim3D
+    case observe3D
+    case topDown2D
+}
+
+enum CameraPhase: Equatable {
+    case ballPlacement
+    case aiming
+    case shotRunning
+    case postShot
+}
+
+enum CameraInteractionState: Equatable {
+    case none
+    case draggingCueBall
+    case draggingTargetBall
+    case rotatingCamera
+}
+
+enum PivotAnchor {
+    case cueBall
+    case tableCenter
+    case fixedPoint(SCNVector3)
+    case selectedBall(String)
+}
+
+struct TransitionState: Equatable {
+    var isActive: Bool
+    var locksCameraInput: Bool
+}
+
+/// CameraPose 统一定义：
+/// - yaw: 世界 Y 轴弧度
+/// - pitch: yawNode 局部 X 轴弧度
+/// - radius: pivot 到 camera 的轨道距离（沿 rig -Z）
+/// - pivot: 世界坐标
+struct CameraPose {
+    var yaw: Float
+    var pitch: Float
+    var radius: Float
+    var pivot: SCNVector3
+}
+
+struct CameraContext {
+    var mode: CameraPresentationMode
+    var phase: CameraPhase
+    var interaction: CameraInteractionState
+    var selectedBallId: String?
+    var pivotFollowLocked: Bool
+    var pivotAnchor: PivotAnchor
+    var shotAnchorPose: CameraPose?
+    var transition: TransitionState?
+    var savedAimPose: CameraPose
+    var observeTargetBallId: String?
+    var observeTargetBallPosition: SCNVector3?
+    var observePocketId: String?
+    var observePocketPosition: SCNVector3?
+
+    static let `default` = CameraContext(
+        mode: .aim3D,
+        phase: .aiming,
+        interaction: .none,
+        selectedBallId: nil,
+        pivotFollowLocked: false,
+        pivotAnchor: .cueBall,
+        shotAnchorPose: nil,
+        transition: nil,
+        savedAimPose: CameraPose(
+            yaw: .pi,
+            pitch: TrainingCameraConfig.aimPitchRad,
+            radius: TrainingCameraConfig.aimRadius,
+            pivot: SCNVector3(0, TablePhysics.height, 0)
+        ),
+        observeTargetBallId: nil,
+        observeTargetBallPosition: nil,
+        observePocketId: nil,
+        observePocketPosition: nil
+    )
+}
+
+enum CameraIntent: Equatable {
+    case none
+    case dragCueBall
+    case selectTarget(String)
+    case rotateYaw(Float)
+    case rotateYawPitch(deltaX: Float, deltaY: Float)
+    case panTopDown(deltaX: Float, deltaY: Float)
+    case zoom(Float)
+}
+
+struct PanGestureInput {
+    var deltaX: Float
+    var deltaY: Float
+}
+
+struct HitResult {
+    var isUI: Bool
+    var isBall: Bool
+    var isCueBall: Bool
+    var isTargetBall: Bool
+    var ballId: String?
+
+    static let none = HitResult(isUI: false, isBall: false, isCueBall: false, isTargetBall: false, ballId: nil)
+}
+
+struct InputRouter {
+    func routeTap(hit: HitResult, context: CameraContext) -> CameraIntent {
+        if context.transition?.isActive == true, context.transition?.locksCameraInput == true {
+            return .none
+        }
+        if hit.isUI { return .none }
+        if hit.isBall,
+           context.phase == .aiming,
+           hit.isTargetBall,
+           let ballId = hit.ballId {
+            return .selectTarget(ballId)
+        }
+        return .none
+    }
+
+    func routePan(startHit: HitResult, input: PanGestureInput, context: CameraContext) -> CameraIntent {
+        if context.transition?.isActive == true, context.transition?.locksCameraInput == true {
+            return .none
+        }
+        if startHit.isUI { return .none }
+        if startHit.isBall, context.phase == .ballPlacement, startHit.isCueBall {
+            return .dragCueBall
+        }
+        if startHit.isBall {
+            return .none
+        }
+
+        switch context.mode {
+        case .aim3D:
+            guard context.phase == .aiming || context.phase == .ballPlacement else { return .none }
+            return .rotateYaw(input.deltaX)
+        case .observe3D:
+            return .rotateYawPitch(deltaX: input.deltaX, deltaY: input.deltaY)
+        case .topDown2D:
+            return .panTopDown(deltaX: input.deltaX, deltaY: input.deltaY)
+        }
+    }
+
+    func routePinch(scale: Float, context: CameraContext) -> CameraIntent {
+        if context.transition?.isActive == true, context.transition?.locksCameraInput == true {
+            return .none
+        }
+        return .zoom(scale)
+    }
+}
+
 // MARK: - Camera State
 
 enum CameraState: Equatable, CustomStringConvertible {

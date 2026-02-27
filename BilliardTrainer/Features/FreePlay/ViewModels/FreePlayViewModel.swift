@@ -56,7 +56,6 @@ class FreePlayViewModel: ObservableObject {
     // MARK: - Setup
     
     private func setupBindings() {
-        // 转发 gameState 变化，让 SwiftUI 刷新 showGameControls 等条件
         sceneViewModel.$gameState
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -71,6 +70,54 @@ class FreePlayViewModel: ObservableObject {
         sceneViewModel.onShotCompleted = { [weak self] _, _ in
             self?.onShotFinished()
         }
+        
+        sceneViewModel.ballSelectionValidator = { [weak self] ballName in
+            self?.validateBallSelection(ballName) ?? (true, nil)
+        }
+    }
+    
+    private func validateBallSelection(_ ballName: String) -> (valid: Bool, message: String?) {
+        guard let num = extractBallNumber(ballName) else { return (true, nil) }
+        
+        switch gameManager.phase {
+        case .waitingBreak, .gameOver:
+            return (true, nil)
+        case .openTable:
+            if num == 8 {
+                return (false, "花色未定，不能选择8号球")
+            }
+            return (true, nil)
+        case .playing(let group):
+            let myCleared = group == .solids ? gameManager.remainingSolids.isEmpty : gameManager.remainingStripes.isEmpty
+            if myCleared {
+                if num != 8 { return (false, "己方花色已清台，请打8号球") }
+                return (true, nil)
+            }
+            if num == 8 {
+                return (false, "己方花色未清台，不能选择8号球")
+            }
+            if group == .solids && (9...15).contains(num) {
+                return (false, "你是全色球方，不能选择花色球")
+            }
+            if group == .stripes && (1...7).contains(num) {
+                return (false, "你是花色球方，不能选择全色球")
+            }
+            return (true, nil)
+        case .eightBallStage:
+            if num != 8 {
+                return (false, "请打8号球")
+            }
+            return (true, nil)
+        }
+    }
+    
+    private func extractBallNumber(_ name: String) -> Int? {
+        if name.hasPrefix("ball_") {
+            return Int(name.dropFirst(5))
+        } else if name.hasPrefix("_"), let num = Int(name.dropFirst(1)) {
+            return num
+        }
+        return nil
     }
     
     // MARK: - Game Control

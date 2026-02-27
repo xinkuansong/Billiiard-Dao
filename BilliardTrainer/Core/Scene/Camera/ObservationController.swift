@@ -10,6 +10,8 @@ import SceneKit
 final class ObservationController {
 
     private let cameraRig: CameraRig
+    private let softClampFactor: Float = 0.2
+    private var userHasTakenOverCamera: Bool = false
 
     init(cameraRig: CameraRig) {
         self.cameraRig = cameraRig
@@ -18,95 +20,89 @@ final class ObservationController {
     // MARK: - Enter Observation
 
     /// 进入观察视角（击球后调用）
-    /// 从当前瞄准位置平滑过渡到球桌长边侧视：
-    /// yaw 旋转到最近的 ±π/2，pivot 移至球桌中心，zoom 升至站立姿态
-    /// CameraRig 阻尼插值自动完成平滑过渡
+    /// 与“观察按钮”保持一致：pivot=白球，yaw=当前瞄准方向
     func enterObservation(cueBallPosition: SCNVector3, aimDirection: SCNVector3) {
         guard TrainingCameraConfig.observationViewEnabled else { return }
 
-        let tableSurfaceY = TablePhysics.height
-        cameraRig.targetPivot = SCNVector3(0, tableSurfaceY, 0)
-
-        cameraRig.targetYaw = bestObservationYaw(
-            cueBallPosition: cueBallPosition,
-            aimDirection: aimDirection
-        )
-
-        cameraRig.pushToObservation(animated: true)
-        cameraRig.beginConstantSpeedTransition()
-    }
-
-    /// 根据击球反方向和白球到四边的距离，选择最自然的观察边
-    /// 优先选择击球反方向所对应的最近库边，实现"自然后退"的观察感
-    private func bestObservationYaw(cueBallPosition: SCNVector3, aimDirection: SCNVector3) -> Float {
-        let halfL = TablePhysics.innerLength / 2
-        let halfW = TablePhysics.innerWidth / 2
-
-        // 四个候选边：yaw 角度、白球到该边的垂直距离、从该边看向球桌中心的方向向量
-        struct EdgeCandidate {
-            let yaw: Float
-            let distFromCueBall: Float
-            let edgeNormalX: Float
-            let edgeNormalZ: Float
-        }
-
-        let candidates: [EdgeCandidate] = [
-            // +Z 长边 (yaw = π/2)：相机在 +Z 侧看向 -Z
-            EdgeCandidate(yaw: .pi / 2,  distFromCueBall: halfW - cueBallPosition.z, edgeNormalX: 0, edgeNormalZ: -1),
-            // -Z 长边 (yaw = -π/2)：相机在 -Z 侧看向 +Z
-            EdgeCandidate(yaw: -.pi / 2, distFromCueBall: halfW + cueBallPosition.z, edgeNormalX: 0, edgeNormalZ: 1),
-            // +X 短边 (yaw = π)：相机在 +X 侧看向 -X
-            EdgeCandidate(yaw: .pi,      distFromCueBall: halfL - cueBallPosition.x, edgeNormalX: -1, edgeNormalZ: 0),
-            // -X 短边 (yaw = 0)：相机在 -X 侧看向 +X
-            EdgeCandidate(yaw: 0,        distFromCueBall: halfL + cueBallPosition.x, edgeNormalX: 1, edgeNormalZ: 0),
-        ]
-
-        let aim = SCNVector3(aimDirection.x, 0, aimDirection.z).normalized()
-        let reverseAimX = -aim.x
-        let reverseAimZ = -aim.z
-
-        var bestYaw: Float = candidates[0].yaw
-        var bestScore: Float = -.greatestFiniteMagnitude
-
-        for edge in candidates {
-            // 击球反方向与该边法线的点积：值越大表示该边越"在身后"
-            let directionAlignment = reverseAimX * edge.edgeNormalX + reverseAimZ * edge.edgeNormalZ
-            // 白球越靠近该边，从该边观察越自然（距离近 = 分数高）
-            let proximityScore = 1.0 / max(0.1, edge.distFromCueBall)
-            // 综合评分：方向对齐为主（权重 0.7），距离为辅（权重 0.3）
-            let score = directionAlignment * 0.7 + proximityScore * 0.3
-
-            if score > bestScore {
-                bestScore = score
-                bestYaw = edge.yaw
-            }
-        }
-
-        return bestYaw
+        userHasTakenOverCamera = false
+        applyObservationLikeToggle(cueBallPosition: cueBallPosition, aimDirection: aimDirection)
     }
 
     // MARK: - Observation Update
 
-    /// 观察态每帧更新：pivot 固定在球桌中心，不跟随白球
-    func updateObservation(cueBallPosition: SCNVector3) {
+    /// 观察态每帧更新：读取 CameraContext 策略并输出目标 pose
+    func updateObservation(context: CameraContext, cueBallPosition _: SCNVector3) {
+        if !userHasTakenOverCamera {
+            cameraRig.targetPivot = softClampPivot(cameraRig.targetPivot)
+        }
+
+        let isInteractionLocked = context.interaction == .rotatingCamera
+        let isTransitionLocked = context.transition?.isActive == true || cameraRig.isTransitioning
+        if isInteractionLocked || isTransitionLocked || userHasTakenOverCamera {
+            return
+        }
+
+        // 击球后不再自动跟随/自动重构图：保持当前观察镜头。
     }
 
-    private func shortestAngleDelta(from: Float, to: Float) -> Float {
-        var delta = to - from
-        while delta > .pi { delta -= 2 * .pi }
-        while delta < -.pi { delta += 2 * .pi }
-        return delta
+    private func applyObservationLikeToggle(cueBallPosition: SCNVector3, aimDirection: SCNVector3) {
+        let tableY = TablePhysics.height
+        cameraRig.disableSmoothPoseControl()
+        cameraRig.targetPivot = SCNVector3(cueBallPosition.x, tableY, cueBallPosition.z)
+        let flatAim = SCNVector3(aimDirection.x, 0, aimDirection.z).normalized()
+        if flatAim.length() > 0.0001 {
+            cameraRig.targetYaw = atan2f(-flatAim.z, -flatAim.x)
+        }
+        cameraRig.pushToObservation(animated: true)
+        cameraRig.beginConstantSpeedTransition(speed: TrainingCameraConfig.cameraTransitionSpeed)
+    }
+
+    private func softClampPivot(_ pivot: SCNVector3) -> SCNVector3 {
+        let margin = BallPhysics.radius * 1.2
+        let halfLength = TablePhysics.innerLength * 0.5 - margin
+        let halfWidth = TablePhysics.innerWidth * 0.5 - margin
+        let clamped = SCNVector3(
+            max(-halfLength, min(halfLength, pivot.x)),
+            TablePhysics.height,
+            max(-halfWidth, min(halfWidth, pivot.z))
+        )
+        return SCNVector3(
+            lerp(pivot.x, clamped.x, t: softClampFactor),
+            TablePhysics.height,
+            lerp(pivot.z, clamped.z, t: softClampFactor)
+        )
+    }
+
+    private func lerp(_ a: Float, _ b: Float, t: Float) -> Float {
+        a + (b - a) * clamp(t, min: 0, max: 1)
+    }
+
+    private func clamp(_ value: Float, min lower: Float, max upper: Float) -> Float {
+        max(lower, min(upper, value))
     }
 
     /// 观察态中用户手动旋转
     func handleObservationPan(deltaX: Float, deltaY: Float) {
+        userHasTakenOverCamera = true
         cameraRig.handleHorizontalSwipe(delta: deltaX, sensitivity: nil)
         cameraRig.handleVerticalSwipe(delta: -deltaY)
     }
 
     /// 观察态中用户手动缩放
     func handleObservationPinch(scale: Float) {
+        userHasTakenOverCamera = true
         cameraRig.handlePinch(scale: scale)
+    }
+
+    /// 目标球切换后的显式重构图：旋转到球杆与瞄准线居中的观察视角
+    func focusOnSelection(
+        cueBallPosition: SCNVector3,
+        targetPosition: SCNVector3,
+        aimDirection: SCNVector3
+    ) {
+        userHasTakenOverCamera = false
+        _ = targetPosition
+        applyObservationLikeToggle(cueBallPosition: cueBallPosition, aimDirection: aimDirection)
     }
 
     // MARK: - Return To Aim
@@ -117,6 +113,7 @@ final class ObservationController {
         savedZoom: Float,
         targetYaw: Float
     ) {
+        userHasTakenOverCamera = false
         let tableSurfaceY = TablePhysics.height
         cameraRig.targetPivot = SCNVector3(
             cueBallPosition.x,
@@ -125,6 +122,6 @@ final class ObservationController {
         )
         cameraRig.returnToAim(zoom: savedZoom, animated: true)
         cameraRig.targetYaw = targetYaw
-        cameraRig.beginConstantSpeedTransition()
+        cameraRig.beginConstantSpeedTransition(speed: TrainingCameraConfig.cameraTransitionSpeed)
     }
 }

@@ -77,6 +77,16 @@ struct TrainingSceneView: View {
             }
             .padding()
 
+            VStack {
+                HStack {
+                    Spacer()
+                    FPSBadge()
+                }
+                Spacer()
+            }
+            .padding(.top, 8)
+            .padding(.trailing, 8)
+
             // 2D俯视模式提示标签
             if viewModel.sceneViewModel.isTopDownView {
                 VStack {
@@ -166,6 +176,22 @@ struct TrainingSceneView: View {
     }
 }
 
+private struct FPSBadge: View {
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+            let fps = Int(RenderQualityManager.shared.currentFPS.rounded())
+            Text("\(fps) FPS")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.ultraThinMaterial)
+                .cornerRadius(8)
+        }
+    }
+}
+
 // MARK: - Top HUD
 private struct TopHUD: View {
     @ObservedObject var viewModel: TrainingViewModel
@@ -231,7 +257,6 @@ private struct TopHUD: View {
             Spacer()
             
             HStack(spacing: 8) {
-                // 2D/3D 视角切换按钮
                 Button(action: onToggleView) {
                     Image(systemName: viewModel.sceneViewModel.isTopDownView ? "cube.fill" : "square.split.1x2.fill")
                         .font(.title3)
@@ -241,7 +266,21 @@ private struct TopHUD: View {
                         .clipShape(Circle())
                 }
 
-                // 连击显示
+                Button {
+                    viewModel.sceneViewModel.toggleRenderQuality()
+                } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: viewModel.sceneViewModel.isHighQuality ? "sparkles" : "sparkle")
+                            .font(.title3)
+                        Text(viewModel.sceneViewModel.isHighQuality ? "高画质" : "低画质")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(viewModel.sceneViewModel.isHighQuality ? .yellow : .white)
+                    .frame(width: 48, height: 48)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(10)
+                }
+
                 if viewModel.comboCount > 1 {
                     ComboIndicator(combo: viewModel.comboCount)
                 }

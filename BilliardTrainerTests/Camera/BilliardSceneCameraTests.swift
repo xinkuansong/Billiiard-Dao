@@ -26,7 +26,11 @@ final class BilliardSceneCameraTests: XCTestCase {
         let modes: [BilliardScene.CameraMode] = [.topDown2D, .action, .aim]
         for mode in modes {
             scene.setCameraMode(mode, animated: false)
-            XCTAssertEqual(scene.currentCameraMode, mode, "Expected mode \(mode)")
+            if mode == .action {
+                XCTAssertEqual(scene.currentCameraMode, .aim, "Action should be folded into aim mode")
+            } else {
+                XCTAssertEqual(scene.currentCameraMode, mode, "Expected mode \(mode)")
+            }
         }
     }
 
@@ -67,13 +71,13 @@ final class BilliardSceneCameraTests: XCTestCase {
 
     // MARK: - CameraRig 行为
 
-    func testSetCameraPostShotSwitchesToAction() {
+    func testSetCameraPostShotKeepsAimModeWithObservingPhase() {
         scene.setCameraMode(.aim, animated: false)
         let cueBallPos = SCNVector3(0, TablePhysics.height + BallPhysics.radius, 0)
         let aimDir = SCNVector3(1, 0, 0)
 
         scene.setCameraPostShot(cueBallPosition: cueBallPos, aimDirection: aimDir)
-        XCTAssertEqual(scene.currentCameraMode, .action)
+        XCTAssertEqual(scene.currentCameraMode, .aim)
     }
 
     func testApplyCameraPanAffectsAimDirection() {
@@ -92,11 +96,11 @@ final class BilliardSceneCameraTests: XCTestCase {
                              "Horizontal pan should change camera yaw/aim direction")
     }
 
-    func testApplyCameraPanIgnoredInTopDown() {
+    func testApplyCameraPanPansInTopDown() {
         scene.setCameraMode(.topDown2D, animated: false)
         let posBefore = scene.cameraNode.position
         scene.applyCameraPan(deltaX: 200, deltaY: 200)
-        XCTAssertVector3Equal(scene.cameraNode.position, posBefore, accuracy: 0.001)
+        XCTAssertGreaterThan(abs(scene.cameraNode.position.x - posBefore.x) + abs(scene.cameraNode.position.z - posBefore.z), 0.001)
     }
 
     func testApplyCameraPinchAffectsZoomInAim() {
@@ -118,14 +122,14 @@ final class BilliardSceneCameraTests: XCTestCase {
         XCTAssertLessThan(zoomAfter, zoomBefore, "Pinch-in should reduce rig zoom")
     }
 
-    func testApplyCameraPinchAffectsOrthographicInTopDown() {
+    func testApplyCameraPinchDoesNotChangeOrthographicInTopDown() {
         scene.setCameraMode(.topDown2D, animated: false)
         let scaleBefore = scene.cameraNode.camera?.orthographicScale ?? 1.0
         scene.applyCameraPinch(scale: 2.0)
         let scaleAfter = scene.cameraNode.camera?.orthographicScale ?? 1.0
 
-        XCTAssertLessThan(scaleAfter, scaleBefore,
-                          "Zoom in (scale > 1) should reduce orthographic scale")
+        XCTAssertEqual(scaleAfter, scaleBefore, accuracy: 0.0001,
+                       "TopDown orthographic scale is controlled by area zoom path, not generic pinch")
     }
 
     func testObservingModeDoesNotFollowCueBallByDefault() {

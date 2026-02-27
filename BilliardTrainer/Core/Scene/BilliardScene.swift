@@ -84,7 +84,13 @@ class BilliardScene: SCNScene {
     /// 视角模式变化回调（供 ViewModel 自动同步 UI 状态）
     var onCameraModeChanged: ((CameraMode) -> Void)?
     /// 记忆用户在 Aim 态的 zoom（用于 Action -> Aim 回归）
-    private var savedAimZoom: Float = 0
+    private(set) var savedAimZoom: Float = 0
+    
+    /// 白球拖动期间锁定相机 pivot 跟随，避免“球桌在移动”的错觉
+    var isPivotFollowLocked: Bool = false
+
+    /// CameraContext 只读提供器：Scene 只消费上下文，不做状态推断
+    var cameraContextProvider: (() -> CameraContext)?
 
     
     /// 球台几何描述
@@ -99,7 +105,7 @@ class BilliardScene: SCNScene {
     // MARK: - Camera Mode
     enum CameraMode: Equatable {
         case aim            // CameraRig 瞄准态
-        case action         // CameraRig 观察态
+        case action         // 兼容旧值：统一折叠为 AIM_3D + SHOT_RUNNING
         case topDown2D      // 2D俯视
     }
     
@@ -589,8 +595,8 @@ class BilliardScene: SCNScene {
         keyLight.intensity = 750
         keyLight.color = UIColor(red: 1.0, green: 0.99, blue: 0.96, alpha: 1.0)
         keyLight.castsShadow = true
-        keyLight.shadowRadius = 2.5
-        keyLight.shadowSampleCount = 16
+        keyLight.shadowRadius = flags.shadowRadius
+        keyLight.shadowSampleCount = flags.shadowSampleCount
         keyLight.shadowColor = UIColor(white: 0.0, alpha: 0.22)
         keyLight.shadowMapSize = CGSize(width: flags.shadowMapSize, height: flags.shadowMapSize)
         keyLight.shadowBias = 0.02
@@ -630,7 +636,7 @@ class BilliardScene: SCNScene {
         let camera = SCNCamera()
         camera.zNear = 0.01
         camera.zFar = 100
-        camera.fieldOfView = CameraRigConfig.aimFov
+        camera.fieldOfView = TrainingCameraConfig.aimFov
 
         // ── HDR + Tone Mapping ──
         camera.wantsHDR = true
@@ -1048,34 +1054,86 @@ class BilliardScene: SCNScene {
     // MARK: - Camera Control
 
     func setCameraMode(_ mode: CameraMode, animated: Bool = true) {
-        currentCameraMode = mode
+        let resolvedMode: CameraMode = (mode == .action) ? .aim : mode
+        currentCameraMode = resolvedMode
         guard let cameraRig else { return }
 
-        switch mode {
+        switch resolvedMode {
         case .topDown2D:
-            cameraNode.camera?.usesOrthographicProjection = true
-            cameraNode.camera?.orthographicScale = TrainingCameraConfig.topDownOrthographicScale
             if animated {
-                SCNTransaction.begin()
-                SCNTransaction.animationDuration = TrainingCameraConfig.transitionDuration
-                SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                transitionToTopDownTwoPhase()
+            } else {
+                cameraNode.camera?.usesOrthographicProjection = true
+                cameraNode.camera?.orthographicScale = TrainingCameraConfig.topDownOrthographicScale
+                cameraNode.position = SCNVector3(0, TablePhysics.height + 3.2, 0)
+                cameraNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
             }
-            // 固定长边俯视：台面正上方，视线朝下（-Y），长边（X 轴 2.54m）水平
-            cameraNode.position = SCNVector3(0, TablePhysics.height + 3.2, 0)
-            cameraNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
-            if animated { SCNTransaction.commit() }
         case .aim, .action:
+            if animated, cameraNode.camera?.usesOrthographicProjection == true {
+                transitionToPerspectiveTwoPhase(mode: resolvedMode, cameraRig: cameraRig)
+                return
+            }
             cameraNode.camera?.usesOrthographicProjection = false
             cameraNode.camera?.fieldOfView = TrainingCameraConfig.aimFov
             if let cueBall = cueBallNode {
                 cameraRig.targetPivot = SCNVector3(cueBall.position.x, TablePhysics.height, cueBall.position.z)
             }
-            if mode == .aim {
-                cameraRig.returnToAim(zoom: savedAimZoom, animated: animated)
-            } else {
-                cameraRig.pushToObservation(animated: animated)
-            }
+            cameraRig.returnToAim(zoom: savedAimZoom, animated: animated)
         }
+    }
+
+    private func transitionToTopDownTwoPhase() {
+        guard let camera = cameraNode.camera else { return }
+        camera.usesOrthographicProjection = false
+        let stage1Pos = SCNVector3(0, TablePhysics.height + 2.4, 0)
+        let stage1Euler = SCNVector3(-70 * Float.pi / 180, 0, 0)
+
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.24
+        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        camera.fieldOfView = TrainingCameraConfig.topDownTransitionNarrowFov
+        cameraNode.position = stage1Pos
+        cameraNode.eulerAngles = stage1Euler
+        SCNTransaction.completionBlock = { [weak self] in
+            guard let self = self, let cam = self.cameraNode.camera else { return }
+            cam.usesOrthographicProjection = true
+            cam.orthographicScale = TrainingCameraConfig.topDownOrthographicScale * 1.2
+            SCNTransaction.begin()
+            SCNTransaction.animationDuration = 0.26
+            SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            cam.orthographicScale = TrainingCameraConfig.topDownOrthographicScale
+            self.cameraNode.position = SCNVector3(0, TablePhysics.height + 3.2, 0)
+            self.cameraNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
+            SCNTransaction.commit()
+        }
+        SCNTransaction.commit()
+    }
+
+    private func transitionToPerspectiveTwoPhase(mode: CameraMode, cameraRig: CameraRig) {
+        guard let camera = cameraNode.camera else { return }
+        let cuePivot = cueBallNode.map { SCNVector3($0.position.x, TablePhysics.height, $0.position.z) } ?? SCNVector3(0, TablePhysics.height, 0)
+        let stage1Pos = SCNVector3(cuePivot.x, TablePhysics.height + 2.2, cuePivot.z)
+        let stage1Euler = SCNVector3(-68 * Float.pi / 180, cameraNode.eulerAngles.y, 0)
+
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.22
+        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        cameraNode.position = stage1Pos
+        cameraNode.eulerAngles = stage1Euler
+        camera.orthographicScale = max(TrainingCameraConfig.topDownOrthographicScale * 0.9, camera.orthographicScale * 0.9)
+        SCNTransaction.completionBlock = { [weak self] in
+            guard let self = self, let cam = self.cameraNode.camera else { return }
+            cam.usesOrthographicProjection = false
+            cam.fieldOfView = TrainingCameraConfig.topDownTransitionWideFov
+            cameraRig.targetPivot = cuePivot
+            if mode == .aim {
+                cameraRig.returnToAim(zoom: self.savedAimZoom, animated: true)
+            } else {
+                cameraRig.pushToObservation(animated: true)
+            }
+            cameraRig.beginConstantSpeedTransition(speed: TrainingCameraConfig.cameraTransitionSpeed)
+        }
+        SCNTransaction.commit()
     }
 
     var currentCameraZoom: Float {
@@ -1100,12 +1158,14 @@ class BilliardScene: SCNScene {
             } else {
                 moved = true
             }
-            if moved {
+            if moved && !isPivotFollowLocked {
                 lastTrackedCueBallXZ = currentXZ
                 cameraRig.targetPivot = SCNVector3(cueBallPosition.x, TablePhysics.height, cueBallPosition.z)
             }
         case .observing:
-            observationController?.updateObservation(cueBallPosition: cueBallPosition)
+            if let context = cameraContextProvider?() {
+                observationController?.updateObservation(context: context, cueBallPosition: cueBallPosition)
+            }
         case .returnToAim:
             if !cameraRig.isTransitioning {
                 cameraStateMachine.handleEvent(.returnAnimationCompleted)
@@ -1114,7 +1174,15 @@ class BilliardScene: SCNScene {
             break
         }
 
+        // 固定顺序：
+        // 1) InputRouter -> Intent（上层）
+        // 2) StrategyLayer -> desiredPose（上层）
+        // 3) Constraints：观察态由 ObservationController 做 soft clamp，其他态保持 hard clamp。
+        if camState != .observing {
+            cameraRig.targetPivot = clampPivotToTable(cameraRig.targetPivot)
+        }
         cameraRig.update(deltaTime: deltaTime)
+        applyCameraRaycastRadiusConstraint()
     }
 
     /// 获取所有目标球的世界坐标（供动态灵敏度计算）
@@ -1140,6 +1208,12 @@ class BilliardScene: SCNScene {
         }
         cameraRig?.handleHorizontalSwipe(delta: deltaX)
         cameraRig?.handleVerticalSwipe(delta: -deltaY)
+    }
+
+    /// 非瞄准/击球态下，确保球桌中心始终作为 orbit pivot
+    func setCameraPivotToTableCenter() {
+        guard let cameraRig else { return }
+        cameraRig.targetPivot = SCNVector3(0, TablePhysics.height, 0)
     }
 
     func applyCameraPinch(scale: Float) {
@@ -1185,11 +1259,12 @@ class BilliardScene: SCNScene {
         aimingController?.aimDirectionFromCamera() ?? SCNVector3(-1, 0, 0)
     }
 
-    /// Anchored orbit：锁定白球在屏幕中的投影位置（Aim/Adjusting 态）
-    func lockCueBallScreenAnchor(in view: SCNView, cueBallWorld: SCNVector3, anchorNormalized: CGPoint) {
+    /// Anchored orbit：锁定白球在屏幕中的投影位置
+    /// - Parameter force: 为 true 时可在观察/回归阶段临时强制居中
+    func lockCueBallScreenAnchor(in view: SCNView, cueBallWorld: SCNVector3, anchorNormalized: CGPoint, force: Bool = false) {
         guard currentCameraMode != .topDown2D else { return }
         let camState = cameraStateMachine.currentState
-        guard (camState == .aiming || camState == .adjusting), let cameraRig else { return }
+        guard force || camState == .aiming || camState == .adjusting, let cameraRig else { return }
         let projected = view.projectPoint(cueBallWorld)
         guard projected.z.isFinite else { return }
 
@@ -1236,7 +1311,7 @@ class BilliardScene: SCNScene {
         cameraStateMachine.saveAimContext(aimDirection: aimDirection, zoom: savedAimZoom)
 
         if TrainingCameraConfig.observationViewEnabled {
-            currentCameraMode = .action
+            currentCameraMode = .aim
             observationController?.enterObservation(
                 cueBallPosition: cueBallPosition,
                 aimDirection: aimDirection
@@ -1257,6 +1332,43 @@ class BilliardScene: SCNScene {
             savedZoom: savedZoom,
             targetYaw: targetYaw
         )
+    }
+
+    func captureCurrentCameraPose() -> CameraPose? {
+        guard let cameraRig else { return nil }
+        return CameraPose(
+            yaw: cameraRig.yaw,
+            pitch: cameraRig.pitch,
+            radius: cameraRig.radius,
+            pivot: cameraRig.currentPivot
+        )
+    }
+
+    private func clampPivotToTable(_ pivot: SCNVector3) -> SCNVector3 {
+        let margin = BallPhysics.radius * 1.2
+        let halfL = TablePhysics.innerLength * 0.5 - margin
+        let halfW = TablePhysics.innerWidth * 0.5 - margin
+        return SCNVector3(
+            max(-halfL, min(halfL, pivot.x)),
+            TablePhysics.height,
+            max(-halfW, min(halfW, pivot.z))
+        )
+    }
+
+    private func applyCameraRaycastRadiusConstraint() {
+        guard let cameraRig else { return }
+        let from = cameraRig.currentPivot
+        let to = cameraNode.position
+        let hits = rootNode.hitTestWithSegment(from: from, to: to, options: nil)
+        guard let first = hits.first else { return }
+
+        let hitNodeName = first.node.name ?? ""
+        let isTableObstacle = hitNodeName.contains("rail") || hitNodeName.contains("cushion") || hitNodeName.contains("table")
+        guard isTableObstacle else { return }
+
+        let dist = (first.worldCoordinates - from).length()
+        let safeRadius = max(TrainingCameraConfig.minDistance, dist - 0.05)
+        cameraRig.setTargetZoom(cameraRig.zoomForRadius(safeRadius))
     }
 
     func returnCameraToAim(animated: Bool) {
@@ -1311,6 +1423,36 @@ class BilliardScene: SCNScene {
     
     // MARK: - Aim Line
     
+    /// 计算瞄准线在碰到球或库边前的有效长度
+    func calculateAimLineLength(from start: SCNVector3, direction: SCNVector3) -> Float {
+        var minDist = AimingSystem.maxAimLineLength
+        let R = BallPhysics.radius
+
+        for ball in targetBallNodes {
+            guard ball.parent != nil, !ball.isHidden else { continue }
+            let ballPos = visualCenter(of: ball)
+            let toBall = ballPos - start
+            let proj = toBall.dot(direction)
+            guard proj > 0 else { continue }
+            let closest = start + direction * proj
+            let perpDist = (ballPos - closest).length()
+            if perpDist < R * 2 {
+                let halfChord = sqrtf(max(0, (R * 2) * (R * 2) - perpDist * perpDist))
+                let hitDist = proj - halfChord
+                if hitDist > 0.01 { minDist = min(minDist, hitDist) }
+            }
+        }
+
+        let halfL = TablePhysics.innerLength / 2
+        let halfW = TablePhysics.innerWidth / 2
+        if direction.x > 0.001 { minDist = min(minDist, (halfL - start.x) / direction.x) }
+        if direction.x < -0.001 { minDist = min(minDist, (-halfL - start.x) / direction.x) }
+        if direction.z > 0.001 { minDist = min(minDist, (halfW - start.z) / direction.z) }
+        if direction.z < -0.001 { minDist = min(minDist, (-halfW - start.z) / direction.z) }
+
+        return max(AimingSystem.minAimLineLength, minDist)
+    }
+
     /// 显示瞄准线
     func showAimLine(from start: SCNVector3, direction: SCNVector3, length: Float) {
         let lineNode: SCNNode
@@ -1448,7 +1590,7 @@ class BilliardScene: SCNScene {
 
     private static let selectionRingName = "_selectionRing"
 
-    /// 在目标球下方添加选中高亮环
+    /// 在目标球下方添加选中高亮环（带淡入避免闪烁）
     func addSelectionHighlight(to node: SCNNode) {
         removeSelectionHighlight(from: node)
         let ring = SCNTorus(ringRadius: CGFloat(BallPhysics.radius * 1.3), pipeRadius: 0.002)
@@ -1458,12 +1600,20 @@ class BilliardScene: SCNScene {
         ring.materials = [mat]
         let ringNode = SCNNode(geometry: ring)
         ringNode.name = BilliardScene.selectionRingName
-        ringNode.position = SCNVector3(0, -BallPhysics.radius + 0.002, 0)
-        node.addChildNode(ringNode)
+        // 以世界坐标附着到台面，避免随球体旋转导致圆环倾斜
+        let ballPos = visualCenter(of: node)
+        ringNode.position = SCNVector3(ballPos.x, TablePhysics.height + 0.002, ballPos.z)
+        ringNode.eulerAngles = SCNVector3Zero
+        ringNode.opacity = 0
+        rootNode.addChildNode(ringNode)
+        ringNode.runAction(SCNAction.fadeIn(duration: 0.15))
     }
 
     /// 移除目标球的选中高亮环
     func removeSelectionHighlight(from node: SCNNode) {
+        rootNode.childNodes
+            .filter { $0.name == BilliardScene.selectionRingName }
+            .forEach { $0.removeFromParentNode() }
         node.childNodes
             .filter { $0.name == BilliardScene.selectionRingName }
             .forEach { $0.removeFromParentNode() }
@@ -1554,7 +1704,7 @@ class BilliardScene: SCNScene {
     func setupRackLayout() {
         let R = BallPhysics.radius
         // 开球三角应紧密贴球；过大间隙会导致只撞动第一颗，无法传递
-        let gap: Float = 0.0008
+        let gap: Float = 0.0016
         let rowOffset = (R * 2 + gap) * sqrt(3.0) / 2.0
         
         // 置球点 (foot spot): 台面左半区 1/4 处，三角阵从这里向 -X 展开（远离白球）

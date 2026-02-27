@@ -56,14 +56,20 @@ final class RenderQualityManager {
     /// Explicit per-feature overrides (for A/B comparison screenshots)
     private var overrides: [RenderFeature: Bool] = [:]
 
-    /// Frame timing for dynamic degradation
+    /// Frame timing for dynamic tier adaptation
     private var recentFrameTimes: [CFTimeInterval] = []
     private let frameHistoryCount = 60
-    private var degradationCooldown: CFTimeInterval = 0
+    private let tierChangeCooldown: CFTimeInterval = 6.0
+    private var tierChangeCooldownUntil: CFTimeInterval = 0
+    private var consecutiveLowFPSWindows: Int = 0
+    private var consecutiveHighFPSWindows: Int = 0
+    private let requiredWindowsForTierChange: Int = 2
+    private(set) var currentFPS: Double = 60
 
     private init() {
-        currentTier = RenderQualityManager.detectTier()
-        featureFlags = RenderQualityManager.flags(for: currentTier)
+        let detectedTier = RenderQualityManager.detectTier()
+        currentTier = detectedTier
+        featureFlags = RenderQualityManager.flags(for: detectedTier)
     }
 
     // MARK: - Tier Detection
@@ -146,7 +152,7 @@ final class RenderQualityManager {
                 clothNormalEnabled: true,
                 railClearcoatEnabled: true,
                 environmentMapSize: 512,
-                maxFPS: 120
+                maxFPS: 60
             )
         }
     }
@@ -176,39 +182,108 @@ final class RenderQualityManager {
         }
     }
 
-    // MARK: - Dynamic Degradation
+    // MARK: - Dynamic Tier Adaptation
 
-    func recordFrameTime(_ dt: CFTimeInterval) {
+    @discardableResult
+    func recordFrameTime(_ dt: CFTimeInterval) -> Bool {
         recentFrameTimes.append(dt)
         if recentFrameTimes.count > frameHistoryCount {
             recentFrameTimes.removeFirst()
         }
+        let sampleCount = max(1, recentFrameTimes.count)
+        currentFPS = 1.0 / (recentFrameTimes.reduce(0, +) / Double(sampleCount))
 
-        guard recentFrameTimes.count >= frameHistoryCount else { return }
+        guard recentFrameTimes.count >= frameHistoryCount else { return false }
         let now = CACurrentMediaTime()
-        guard now > degradationCooldown else { return }
-
         let avgFPS = 1.0 / (recentFrameTimes.reduce(0, +) / Double(recentFrameTimes.count))
-        let threshold: Double = currentTier == .high ? 50.0 : 25.0
+        recentFrameTimes.removeAll()
 
-        if avgFPS < threshold && currentTier > .low {
-            degradeOneTier()
-            degradationCooldown = now + 5.0
-            recentFrameTimes.removeAll()
+        guard now > tierChangeCooldownUntil else { return false }
+
+        if avgFPS < degradeThreshold(for: currentTier), currentTier > .low {
+            consecutiveLowFPSWindows += 1
+            consecutiveHighFPSWindows = 0
+            if consecutiveLowFPSWindows >= requiredWindowsForTierChange {
+                consecutiveLowFPSWindows = 0
+                tierChangeCooldownUntil = now + tierChangeCooldown
+                return degradeOneTier(avgFPS: avgFPS)
+            }
+            return false
+        }
+
+        if avgFPS > upgradeThreshold(for: currentTier), currentTier < .high {
+            consecutiveHighFPSWindows += 1
+            consecutiveLowFPSWindows = 0
+            if consecutiveHighFPSWindows >= requiredWindowsForTierChange {
+                consecutiveHighFPSWindows = 0
+                tierChangeCooldownUntil = now + tierChangeCooldown
+                return upgradeOneTier(avgFPS: avgFPS)
+            }
+            return false
+        }
+
+        consecutiveLowFPSWindows = 0
+        consecutiveHighFPSWindows = 0
+        return false
+    }
+
+    private func degradeOneTier(avgFPS: Double) -> Bool {
+        guard let lower = RenderTier(rawValue: currentTier.rawValue - 1) else { return false }
+        applyTier(
+            lower,
+            logPrefix: "⚠️ Degrading",
+            avgFPS: avgFPS
+        )
+        return true
+    }
+
+    private func upgradeOneTier(avgFPS: Double) -> Bool {
+        guard let higher = RenderTier(rawValue: currentTier.rawValue + 1) else { return false }
+        applyTier(
+            higher,
+            logPrefix: "✅ Upgrading",
+            avgFPS: avgFPS
+        )
+        return true
+    }
+
+    private func applyTier(_ tier: RenderTier, logPrefix: String, avgFPS: Double) {
+        let from = currentTier
+        currentTier = tier
+        featureFlags = RenderQualityManager.flags(for: tier)
+        print("[RenderQuality] \(logPrefix) from \(from) to \(tier), avgFPS=\(String(format: "%.1f", avgFPS))")
+    }
+
+    private func degradeThreshold(for tier: RenderTier) -> Double {
+        switch tier {
+        case .high:
+            return 50.0
+        case .medium:
+            return 35.0
+        case .low:
+            return 0
         }
     }
 
-    private func degradeOneTier() {
-        guard let lower = RenderTier(rawValue: currentTier.rawValue - 1) else { return }
-        print("[RenderQuality] ⚠️ Degrading from \(currentTier) to \(lower)")
-        currentTier = lower
-        featureFlags = RenderQualityManager.flags(for: lower)
+    private func upgradeThreshold(for tier: RenderTier) -> Double {
+        switch tier {
+        case .low:
+            return 48.0
+        case .medium:
+            return 56.0
+        case .high:
+            return .greatestFiniteMagnitude
+        }
     }
 
     /// Force a specific tier (for testing / settings UI)
     func setTier(_ tier: RenderTier) {
         currentTier = tier
         featureFlags = RenderQualityManager.flags(for: tier)
+        recentFrameTimes.removeAll()
+        consecutiveLowFPSWindows = 0
+        consecutiveHighFPSWindows = 0
+        tierChangeCooldownUntil = CACurrentMediaTime() + tierChangeCooldown
         overrides.removeAll()
     }
 }

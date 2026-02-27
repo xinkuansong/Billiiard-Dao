@@ -45,6 +45,19 @@ struct FreePlayView: View {
                         .animation(.easeInOut(duration: 0.3), value: viewModel.foulFlash)
                 }
                 
+                if let warning = viewModel.sceneViewModel.selectionWarning {
+                    Text(warning)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.orange.opacity(0.85))
+                        .cornerRadius(10)
+                        .transition(.opacity)
+                        .animation(.easeInOut(duration: 0.25), value: viewModel.sceneViewModel.selectionWarning)
+                }
+                
                 Spacer()
                 
                 // Bottom controls
@@ -58,6 +71,34 @@ struct FreePlayView: View {
                             )
                         )
                         .padding(.leading, 16)
+                    }
+                    
+                    // View toggle buttons
+                    if showGameControls && !viewModel.sceneViewModel.isTopDownView {
+                        VStack(spacing: 8) {
+                            Button {
+                                viewModel.sceneViewModel.switchToObservationView()
+                            } label: {
+                                Image(systemName: "eye.fill")
+                                    .font(.title3)
+                                    .foregroundColor(viewModel.sceneViewModel.isInObservationView ? .yellow : .white)
+                                    .frame(width: 40, height: 40)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(Circle())
+                            }
+                            
+                            Button {
+                                viewModel.sceneViewModel.switchToAimingView()
+                            } label: {
+                                Image(systemName: "scope")
+                                    .font(.title3)
+                                    .foregroundColor(!viewModel.sceneViewModel.isInObservationView ? .yellow : .white)
+                                    .frame(width: 40, height: 40)
+                                    .background(.ultraThinMaterial)
+                                    .clipShape(Circle())
+                            }
+                        }
+                        .padding(.leading, 12)
                     }
                     
                     Spacer()
@@ -88,7 +129,7 @@ struct FreePlayView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 8)
             }
-            
+
             // 2D mode label
             if viewModel.sceneViewModel.isTopDownView {
                 VStack {
@@ -150,6 +191,22 @@ struct FreePlayView: View {
     
     private var showGameControls: Bool {
         viewModel.sceneViewModel.gameState == .aiming
+    }
+}
+
+private struct FPSBadge: View {
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+            let fps = Int(RenderQualityManager.shared.currentFPS.rounded())
+            Text("\(fps) FPS")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.ultraThinMaterial)
+                .cornerRadius(8)
+        }
     }
 }
 
@@ -259,11 +316,27 @@ private struct FreePlayTopHUD: View {
                         .clipShape(Circle())
                 }
                 
+                Button {
+                    viewModel.sceneViewModel.toggleRenderQuality()
+                } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: viewModel.sceneViewModel.isHighQuality ? "sparkles" : "sparkle")
+                            .font(.title3)
+                        Text(viewModel.sceneViewModel.isHighQuality ? "高画质" : "低画质")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(viewModel.sceneViewModel.isHighQuality ? .yellow : .white)
+                    .frame(width: 48, height: 48)
+                    .background(.ultraThinMaterial)
+                    .cornerRadius(10)
+                }
+                
                 if showReplayButton {
                     ActionButton(icon: "arrow.counterclockwise", label: "回放", action: onReplay)
                 }
                 
                 ActionButton(icon: "arrow.clockwise", label: "重置", action: onReset)
+                FPSBadge()
             }
         }
     }

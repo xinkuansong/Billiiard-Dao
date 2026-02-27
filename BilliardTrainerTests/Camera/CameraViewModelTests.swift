@@ -130,4 +130,102 @@ final class CameraViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.gameState, .aiming)
         XCTAssertEqual(viewModel.scene.currentCameraMode, .aim)
     }
+
+    // MARK: - InputRouter v1
+
+    func testInputRouterTapSelectsTargetInAiming() {
+        let router = InputRouter()
+        var context = CameraContext.default
+        context.mode = .aim3D
+        context.phase = .aiming
+
+        let hit = HitResult(isUI: false, isBall: true, isCueBall: false, isTargetBall: true, ballId: "ball_3")
+        let intent = router.routeTap(hit: hit, context: context)
+
+        XCTAssertEqual(intent, .selectTarget("ball_3"))
+    }
+
+    func testInputRouterTapIgnoredWhenTransitionLocksInput() {
+        let router = InputRouter()
+        var context = CameraContext.default
+        context.phase = .aiming
+        context.transition = TransitionState(isActive: true, locksCameraInput: true)
+
+        let hit = HitResult(isUI: false, isBall: true, isCueBall: false, isTargetBall: true, ballId: "ball_9")
+        XCTAssertEqual(router.routeTap(hit: hit, context: context), .none)
+    }
+
+    func testInputRouterPanDragsCueBallOnlyInBallPlacement() {
+        let router = InputRouter()
+        var context = CameraContext.default
+        context.mode = .aim3D
+        context.phase = .ballPlacement
+
+        let cueHit = HitResult(isUI: false, isBall: true, isCueBall: true, isTargetBall: false, ballId: nil)
+        let intent = router.routePan(
+            startHit: cueHit,
+            input: PanGestureInput(deltaX: 10, deltaY: 5),
+            context: context
+        )
+        XCTAssertEqual(intent, .dragCueBall)
+    }
+
+    func testInputRouterPanOnBallDoesNotRotateCamera() {
+        let router = InputRouter()
+        var context = CameraContext.default
+        context.mode = .observe3D
+        context.phase = .aiming
+
+        let targetHit = HitResult(isUI: false, isBall: true, isCueBall: false, isTargetBall: true, ballId: "ball_5")
+        let intent = router.routePan(
+            startHit: targetHit,
+            input: PanGestureInput(deltaX: 20, deltaY: 10),
+            context: context
+        )
+        XCTAssertEqual(intent, .none)
+    }
+
+    func testInputRouterPanBlankAreaRoutesByMode() {
+        let router = InputRouter()
+        let blank = HitResult.none
+
+        var aimContext = CameraContext.default
+        aimContext.mode = .aim3D
+        aimContext.phase = .aiming
+        let aimIntent = router.routePan(
+            startHit: blank,
+            input: PanGestureInput(deltaX: 12, deltaY: 7),
+            context: aimContext
+        )
+        XCTAssertEqual(aimIntent, .rotateYaw(12))
+
+        var observeContext = CameraContext.default
+        observeContext.mode = .observe3D
+        observeContext.phase = .postShot
+        let observeIntent = router.routePan(
+            startHit: blank,
+            input: PanGestureInput(deltaX: 12, deltaY: 7),
+            context: observeContext
+        )
+        XCTAssertEqual(observeIntent, .rotateYawPitch(deltaX: 12, deltaY: 7))
+
+        var topContext = CameraContext.default
+        topContext.mode = .topDown2D
+        let topIntent = router.routePan(
+            startHit: blank,
+            input: PanGestureInput(deltaX: 12, deltaY: 7),
+            context: topContext
+        )
+        XCTAssertEqual(topIntent, .panTopDown(deltaX: 12, deltaY: 7))
+    }
+
+    func testCameraContextFollowsStateMachineTransition() {
+        viewModel.scene.cameraStateMachine.forceState(.observing)
+        XCTAssertEqual(viewModel.cameraContext.mode, .observe3D)
+        XCTAssertEqual(viewModel.cameraContext.phase, .shotRunning)
+
+        viewModel.scene.cameraStateMachine.forceState(.aiming)
+        XCTAssertEqual(viewModel.cameraContext.mode, .aim3D)
+        XCTAssertEqual(viewModel.cameraContext.phase, .aiming)
+    }
 }

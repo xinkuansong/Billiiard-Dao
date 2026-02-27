@@ -62,7 +62,8 @@ final class MaterialFactory {
     /// Enhance table cloth (felt) material found in a USDZ model node tree.
     /// Uses both node name heuristics AND material name / diffuse color sampling.
     static func enhanceClothMaterials(in tableNode: SCNNode) {
-        let normalMap = generateFeltNormalMap(size: 512)
+        let useClothNormal = RenderQualityManager.shared.isEnabled(.clothNormal)
+        let normalMap = useClothNormal ? generateFeltNormalMap(size: 512) : nil
         var enhanced = 0
 
         enumerateMaterials(in: tableNode) { material, nodeName in
@@ -72,11 +73,16 @@ final class MaterialFactory {
             material.roughness.contents = Float(0.89)
             material.metalness.contents = Float(0.0)
 
-            material.normal.contents = normalMap
-            material.normal.intensity = 0.055
-            material.normal.wrapS = .repeat
-            material.normal.wrapT = .repeat
-            material.normal.contentsTransform = SCNMatrix4MakeScale(14, 14, 1)
+            if let normalMap {
+                material.normal.contents = normalMap
+                material.normal.intensity = 0.055
+                material.normal.wrapS = .repeat
+                material.normal.wrapT = .repeat
+                material.normal.contentsTransform = SCNMatrix4MakeScale(14, 14, 1)
+            } else {
+                material.normal.contents = nil
+                material.normal.intensity = 0
+            }
 
             // Darken ~8% + desaturate ~8% (remove fluorescent feel)
             if let color = material.diffuse.contents as? UIColor {
