@@ -171,8 +171,7 @@ struct BilliardSceneView: UIViewRepresentable {
             viewModel.updateTrajectoryPlaybackFrame(timestamp: now)
             
             viewModel.scene.updateShadowPositions()
-            guard let cueBall = viewModel.scene.cueBallNode else { return }
-            let cueCenter = viewModel.scene.visualCenter(of: cueBall)
+
             let deltaTime: Float
             if let last = lastTimestamp {
                 let dt = max(1.0 / 240.0, min(1.0 / 20.0, now - last))
@@ -186,6 +185,14 @@ struct BilliardSceneView: UIViewRepresentable {
 
             let isTopDown = viewModel.scene.currentCameraMode == .topDown2D
             let camState = viewModel.scene.cameraStateMachine.currentState
+
+            // 相机更新：不依赖 cueBallNode，保证手势控制始终生效
+            let cueCenter: SCNVector3
+            if let cueBall = viewModel.scene.cueBallNode {
+                cueCenter = viewModel.scene.visualCenter(of: cueBall)
+            } else {
+                cueCenter = SCNVector3(0, TablePhysics.height + BallPhysics.radius, 0)
+            }
 
             if isTopDown {
                 viewModel.scene.updateTopDownZoom()
@@ -213,7 +220,9 @@ struct BilliardSceneView: UIViewRepresentable {
 
             viewModel.pitchAngle = viewModel.scene.cameraNode.eulerAngles.x
             
-            // 更新球杆位置（含碰撞检测仰角）— 瞄准/观察视角均显示
+            guard viewModel.scene.cueBallNode != nil else { return }
+            
+            // 以下功能需要白球存在
             if viewModel.gameState == .aiming && !isTopDown {
                 let pullBack = (viewModel.currentPower / 100.0) * CueStickSettings.maxPullBack
                 let elevation = CueStick.calculateRequiredElevation(
@@ -230,7 +239,6 @@ struct BilliardSceneView: UIViewRepresentable {
                 )
             }
             
-            // 更新瞄准线和轨迹预测（2D 俯视模式下不显示）
             if viewModel.gameState == .aiming && !isTopDown {
                 if now - lastAimLineUpdateTimestamp >= (1.0 / 45.0) {
                     let aimLineLen = viewModel.scene.calculateAimLineLength(
@@ -318,18 +326,21 @@ struct BilliardSceneView: UIViewRepresentable {
             case .dragCueBall:
                 handlePlacingPan(gesture: gesture, in: view)
             case .rotateYaw(let deltaX):
-                guard viewModel.gameState == .aiming,
-                      let aimCtrl = viewModel.scene.aimingController,
-                      let cueBall = viewModel.scene.cueBallNode else { return }
-                let cueBallPos = viewModel.scene.visualCenter(of: cueBall)
-                let targetPositions = viewModel.scene.targetBallPositions()
-                viewModel.aimDirection = aimCtrl.handleHorizontalSwipe(
-                    delta: deltaX,
-                    currentAimDirection: viewModel.aimDirection,
-                    cueBallPos: cueBallPos,
-                    targetBalls: targetPositions
-                )
-                viewModel.updateTrajectoryPreview()
+                guard viewModel.gameState == .aiming else { return }
+                if let aimCtrl = viewModel.scene.aimingController,
+                   let cueBall = viewModel.scene.cueBallNode {
+                    let cueBallPos = viewModel.scene.visualCenter(of: cueBall)
+                    let targetPositions = viewModel.scene.targetBallPositions()
+                    viewModel.aimDirection = aimCtrl.handleHorizontalSwipe(
+                        delta: deltaX,
+                        currentAimDirection: viewModel.aimDirection,
+                        cueBallPos: cueBallPos,
+                        targetBalls: targetPositions
+                    )
+                    viewModel.updateTrajectoryPreview()
+                } else {
+                    viewModel.scene.cameraRig?.handleHorizontalSwipe(delta: deltaX)
+                }
             case .rotateYawPitch(let deltaX, let deltaY):
                 viewModel.cameraContext.interaction = .rotatingCamera
                 if viewModel.selectedNextTarget != nil,
@@ -583,7 +594,7 @@ class BilliardSceneViewModel: ObservableObject {
     @Published var scene: BilliardScene
     @Published var gameState: GameState = .idle
     @Published var currentPower: Float = 0
-    @Published var aimDirection: SCNVector3 = SCNVector3(1, 0, 0)
+    @Published var aimDirection: SCNVector3 = SCNVector3(-1, 0, 0)
     @Published var selectedCuePoint: CGPoint = CGPoint(x: 0.5, y: 0.5)  // 打点位置 (0-1)
     @Published var isTopDownView: Bool = false  // 2D/3D 视角切换
     @Published var isHighQuality: Bool = false   // 高/低画质切换

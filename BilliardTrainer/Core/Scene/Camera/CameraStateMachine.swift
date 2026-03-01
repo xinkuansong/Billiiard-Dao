@@ -76,7 +76,7 @@ struct CameraContext {
         shotAnchorPose: nil,
         transition: nil,
         savedAimPose: CameraPose(
-            yaw: .pi,
+            yaw: 0,
             pitch: TrainingCameraConfig.aimPitchRad,
             radius: TrainingCameraConfig.aimRadius,
             pivot: SCNVector3(0, TablePhysics.height, 0)

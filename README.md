@@ -118,6 +118,13 @@ BilliardTrainer/
 
 ## 文档
 
+### 模块文档（开发必读）
+
+- [**模块文档索引**](docs/modules/BilliardTrainer/README.md) — 15 个模块的 README / 设计约束 / 验证门禁
+- 工作流规则：`.cursor/rules/10-module-doc-read-change-backfill.mdc`（读-改-回填 + 回归门禁）
+
+### 产品与规划
+
 - [产品定位](docs/phase1_产品定位.md)
 - [教学体系设计](docs/phase2_教学体系设计.md)
 - [技术方案](docs/phase3_技术方案与系统架构.md)

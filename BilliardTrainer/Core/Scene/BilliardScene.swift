@@ -700,7 +700,7 @@ class BilliardScene: SCNScene {
     
     // MARK: - Model Ball Extraction
     
-    /// 从 USDZ 模型中提取球节点，设置物理体，作为游戏球使用
+    /// 从 USDZ 模型中提取目标球和白球（_0），设置物理体后作为游戏球使用
     private func setupModelBalls() {
         guard let visualNode = tableNode.childNode(withName: "tableVisual", recursively: false) else {
             print("[BilliardScene] ❌ 未找到 tableVisual 节点，USDZ 模型加载失败")
@@ -734,27 +734,35 @@ class BilliardScene: SCNScene {
             }
         }
         
-        let ballNames = (0...15).map { "_\($0)" }
+        let targetBallNames = (1...15).map { "_\($0)" }
+        let cueBallCandidates: Set<String> = ["_0", "BaiQiu"]
         var foundCount = 0
         var ballSizeVerified = 0
         var ballSizeMismatch = 0
         let correctY = TablePhysics.height + BallPhysics.radius
-        for name in ballNames {
+        var cueBallFound = false
+        
+        for name in targetBallNames + ["_0", "BaiQiu"] {
+            if cueBallCandidates.contains(name) && cueBallFound { continue }
+            
             var matches: [SCNNode] = []
             collectNodes(named: name, in: visualNode, result: &matches)
             
             guard !matches.isEmpty else {
-                print("[BilliardScene] 模型中未找到球节点: \(name)")
+                if !cueBallCandidates.contains(name) {
+                    print("[BilliardScene] 模型中未找到球节点: \(name)")
+                }
                 continue
             }
             
-            // _N 通常是空父节点，真实网格在子节点里；以 _N 为提取锚点
+            let isCueBall = cueBallCandidates.contains(name)
+            
             let anchorNode = matches[0]
             guard let sourceNode = firstGeometryNode(in: anchorNode) else {
                 print("[BilliardScene] ⚠️ 球 '\(name)' 未找到几何网格节点")
                 continue
             }
-            foundCount += 1
+            if !isCueBall { foundCount += 1 }
             
             // 计算球心世界坐标（不能用 node.position；该模型球心在几何顶点偏移里）
             let (meshMin, meshMax) = sourceNode.boundingBox
@@ -772,8 +780,13 @@ class BilliardScene: SCNScene {
             // 以空根节点作为“球心节点”，把原始网格子树平移到以球心为原点
             // 这样后续 applyBallLayout 只改 ballRoot.position 就不会出现网格跑到台外
             anchorNode.removeFromParentNode()
+            // worldScale 已包含 anchorNode 的 localScale，必须重置为 identity 防止双重缩放
+            // (BaiQiu Xform 自带 localScale≈0.001，不重置会导致 effective scale = worldScale × localScale)
+            anchorNode.transform = SCNMatrix4Identity
+            
             let originalBall = SCNNode()
-            originalBall.name = name
+            let ballKey = isCueBall ? "cueBall" : name
+            originalBall.name = ballKey
             originalBall.transform = SCNMatrix4Identity
             originalBall.scale = SCNVector3(worldScale, worldScale, worldScale)
             
@@ -781,10 +794,14 @@ class BilliardScene: SCNScene {
             anchorNode.position = SCNVector3(-centerInAnchor.x, -centerInAnchor.y, -centerInAnchor.z)
             originalBall.addChildNode(anchorNode)
             
-            // ballRoot 位置就是球心位置
-            originalBall.position = SCNVector3(worldCenter.x, correctY, worldCenter.z)
+            let targetPos: SCNVector3
+            if isCueBall {
+                targetPos = SCNVector3(BilliardScene.headStringX, correctY, 0)
+            } else {
+                targetPos = SCNVector3(worldCenter.x, correctY, worldCenter.z)
+            }
+            originalBall.position = targetPos
             
-            // 二次校正：确保 mesh 的视觉中心与 ballRoot 重合（消除模型局部偏移）
             if let meshNode = firstGeometryNode(in: originalBall) {
                 let (mmn, mmx) = meshNode.boundingBox
                 let meshCenterLocal2 = SCNVector3(
@@ -794,17 +811,15 @@ class BilliardScene: SCNScene {
                 )
                 let visualCenterWorld = meshNode.convertPosition(meshCenterLocal2, to: nil)
                 let deltaWorld = SCNVector3(
-                    worldCenter.x - visualCenterWorld.x,
-                    worldCenter.y - visualCenterWorld.y,
-                    worldCenter.z - visualCenterWorld.z
+                    targetPos.x - visualCenterWorld.x,
+                    targetPos.y - visualCenterWorld.y,
+                    targetPos.z - visualCenterWorld.z
                 )
                 let invScale = worldScale > 0.0001 ? (1.0 / worldScale) : 1.0
-                // root 无旋转，仅有均匀缩放；将世界偏移换算到 root 局部
                 anchorNode.position = anchorNode.position + deltaWorld * invScale
             }
             recenterBallVisualIfNeeded(originalBall)
             
-            // 验证：3D 模型球的视觉半径（世界空间）是否与 BallPhysics.radius 一致
             if let meshNode = firstGeometryNode(in: originalBall) {
                 let (mmn, mmx) = meshNode.boundingBox
                 let localHalfX = (mmx.x - mmn.x) * 0.5
@@ -813,13 +828,13 @@ class BilliardScene: SCNScene {
                 let localRadius = max(localHalfX, localHalfY, localHalfZ)
                 let worldVisualRadius = Float(localRadius) * worldScale
                 let expectedRadius = BallPhysics.radius
-                let tolerance: Float = 0.0005  // 0.5mm
+                let tolerance: Float = 0.0005
                 let match = abs(worldVisualRadius - expectedRadius) <= tolerance
                 if match { ballSizeVerified += 1 } else { ballSizeMismatch += 1 }
-                print("[BilliardScene] 球 '\(name)' 尺寸验证: 模型世界半径=\(String(format: "%.5f", worldVisualRadius))m, 物理常数=\(String(format: "%.5f", expectedRadius))m, 一致=\(match ? "✓" : "✗")")
+                print("[BilliardScene] 球 '\(ballKey)' 尺寸验证: 模型世界半径=\(String(format: "%.5f", worldVisualRadius))m, 物理常数=\(String(format: "%.5f", expectedRadius))m, 一致=\(match ? "✓" : "✗")")
             }
             
-            print("[BilliardScene] 球 '\(name)': scale=\(worldScale), renderable=\(hasRenderableGeometry(originalBall)), center=\(originalBall.position)")
+            print("[BilliardScene] 球 '\(ballKey)': scale=\(worldScale), renderable=\(hasRenderableGeometry(originalBall)), center=\(originalBall.position)")
             
             let physRadius = worldScale > 0.001 ? CGFloat(BallPhysics.radius / worldScale) : CGFloat(BallPhysics.radius)
             let physicsBody = SCNPhysicsBody(
@@ -837,20 +852,12 @@ class BilliardScene: SCNScene {
             
             rootNode.addChildNode(originalBall)
             
-            if name == "_0" {
-                originalBall.name = "cueBall"
+            if isCueBall {
                 cueBallNode = originalBall
-                
-                let cueBallPos = SCNVector3(
-                    BilliardScene.headStringX,
-                    correctY,
-                    0
-                )
-                cueBallNode.position = cueBallPos
-                initialBallPositions["cueBall"] = cueBallPos
+                initialBallPositions["cueBall"] = targetPos
                 allBallNodes["cueBall"] = originalBall
-                
-                print("[BilliardScene] 白球(_0) 已设为母球，位于置球点: \(cueBallPos)")
+                cueBallFound = true
+                print("[BilliardScene] ✅ 白球(模型 \(name)) 已加载到置球点: \(targetPos), scale=\(worldScale)")
             } else {
                 let correctedPos = SCNVector3(worldCenter.x, correctY, worldCenter.z)
                 targetBallNodes.append(originalBall)
@@ -859,9 +866,15 @@ class BilliardScene: SCNScene {
             }
         }
         
-        // 清除 tableVisual 中同名残留球节点
+        if cueBallNode == nil {
+            print("[BilliardScene] ⚠️ 模型中未找到白球（_0/BaiQiu），尝试 cueball.usdz 降级加载")
+            loadCueBallFromResource(correctY: correctY)
+        }
+        
+        // 清除 tableVisual 中所有残留球节点（含白球命名兼容）
+        let allBallNames = ["_0", "BaiQiu"] + targetBallNames
         var removedResidual = 0
-        for name in ballNames {
+        for name in allBallNames {
             while let residual = visualNode.childNode(withName: name, recursively: true) {
                 residual.removeFromParentNode()
                 removedResidual += 1
@@ -872,13 +885,13 @@ class BilliardScene: SCNScene {
             print("[BilliardScene] 🧹 清除了 \(removedResidual) 个残留球视觉副本")
         }
         
-        print("[BilliardScene] 🎱 从模型中提取了 \(foundCount) / 16 个球节点")
+        print("[BilliardScene] 🎱 从模型中提取了 \(foundCount) / 15 个目标球节点")
         if foundCount > 0 {
             print("[BilliardScene] 📐 球尺寸验证汇总: \(ballSizeVerified)/\(foundCount) 与 BallPhysics.radius(\(String(format: "%.5f", BallPhysics.radius))m) 一致" + (ballSizeMismatch > 0 ? ", \(ballSizeMismatch) 个不一致" : ""))
         }
         
         if cueBallNode == nil {
-            print("[BilliardScene] ❌ 模型中未找到白球(_0)，请检查 USDZ 模型")
+            print("[BilliardScene] ❌ 白球加载失败（模型 _0/BaiQiu 与 cueball.usdz 均不可用）")
         }
         
         if let cb = cueBallNode {
@@ -902,6 +915,150 @@ class BilliardScene: SCNScene {
         sanitizeBallLayout()
         
         enhanceBallMaterials()
+        ensureCueBallRenderable()
+    }
+    
+    /// 确保白球可渲染：诊断 USDZ 几何体/材质，必要时替换为程序化球体
+    private func ensureCueBallRenderable() {
+        guard let cb = cueBallNode else { return }
+        
+        var geoSources = 0
+        var geoElements = 0
+        var matCount = 0
+        var diffuseDesc = "none"
+        
+        func inspect(_ node: SCNNode) {
+            if let geo = node.geometry {
+                geoSources += geo.sources.count
+                geoElements += geo.elements.count
+                for mat in geo.materials {
+                    matCount += 1
+                    if let d = mat.diffuse.contents {
+                        diffuseDesc = "\(type(of: d))"
+                    }
+                }
+            }
+            node.childNodes.forEach { inspect($0) }
+        }
+        inspect(cb)
+        
+        print("[BilliardScene] 🔍 白球渲染诊断: geoSources=\(geoSources), geoElements=\(geoElements), materials=\(matCount), diffuse=\(diffuseDesc), isHidden=\(cb.isHidden), opacity=\(cb.opacity)")
+        
+        if geoSources == 0 || geoElements == 0 {
+            replaceCueBallWithSphere(cb)
+            return
+        }
+        
+        // USDZ 纹理可能带 alpha=0，强制所有材质不透明
+        func forceOpaque(_ node: SCNNode) {
+            if let geo = node.geometry {
+                for mat in geo.materials {
+                    mat.transparency = 1.0
+                    mat.transparent.contents = UIColor.white
+                    mat.isDoubleSided = true
+                    mat.writesToDepthBuffer = true
+                    mat.readsFromDepthBuffer = true
+                    mat.blendMode = .replace
+                }
+            }
+            node.childNodes.forEach { forceOpaque($0) }
+        }
+        forceOpaque(cb)
+        print("[BilliardScene] 🔧 白球材质已强制不透明 (blendMode=replace, transparent=white)")
+    }
+    
+    /// 用程序化白球替换 USDZ 几何体（兜底方案）
+    private func replaceCueBallWithSphere(_ cb: SCNNode) {
+        let localScale = cb.scale.x
+        let localRadius = localScale > 0.001 ? CGFloat(BallPhysics.radius / localScale) : CGFloat(BallPhysics.radius)
+        let sphere = SCNSphere(radius: localRadius)
+        sphere.segmentCount = 48
+        let mat = SCNMaterial()
+        mat.lightingModel = .physicallyBased
+        mat.diffuse.contents = UIColor.white
+        mat.roughness.contents = Float(0.033)
+        mat.metalness.contents = Float(0.0)
+        sphere.materials = [mat]
+        
+        cb.childNodes.forEach { $0.removeFromParentNode() }
+        let sphereNode = SCNNode(geometry: sphere)
+        cb.addChildNode(sphereNode)
+        
+        MaterialFactory.applyBallMaterial(to: cb)
+        attachShadow(to: cb)
+        
+        print("[BilliardScene] ⚠️ 白球 USDZ 几何体无效，已替换为程序化白球 (radius=\(localRadius))")
+    }
+
+    /// 降级方案：从独立资源 cueball.usdz 加载白球
+    private func loadCueBallFromResource(correctY: Float) {
+        guard let cueScene = SCNScene(named: "cueball.usdz") else {
+            print("[BilliardScene] ❌ cueball.usdz 加载失败")
+            return
+        }
+
+        func firstGeometryNode(in node: SCNNode) -> SCNNode? {
+            if node.geometry != nil { return node }
+            for child in node.childNodes {
+                if let found = firstGeometryNode(in: child) { return found }
+            }
+            return nil
+        }
+
+        guard firstGeometryNode(in: cueScene.rootNode) != nil else {
+            print("[BilliardScene] ❌ cueball.usdz 未找到几何网格节点")
+            return
+        }
+
+        // 克隆整棵场景树，保留原始层级变换链
+        let anchorNode = cueScene.rootNode.clone()
+        guard let anchorMesh = firstGeometryNode(in: anchorNode) else {
+            print("[BilliardScene] ❌ cueball.usdz 几何节点克隆失败")
+            return
+        }
+
+        let (meshMin, meshMax) = anchorMesh.boundingBox
+        let meshCenterLocal = SCNVector3(
+            (meshMin.x + meshMax.x) * 0.5,
+            (meshMin.y + meshMax.y) * 0.5,
+            (meshMin.z + meshMax.z) * 0.5
+        )
+        let centerInAnchor = anchorMesh.convertPosition(meshCenterLocal, to: anchorNode)
+
+        let cueBall = SCNNode()
+        cueBall.name = "cueBall"
+        cueBall.transform = SCNMatrix4Identity
+        cueBall.scale = SCNVector3(1, 1, 1)
+        anchorNode.position = SCNVector3(-centerInAnchor.x, -centerInAnchor.y, -centerInAnchor.z)
+        cueBall.addChildNode(anchorNode)
+
+        let cueBallPos = SCNVector3(BilliardScene.headStringX, correctY, 0)
+        cueBall.position = cueBallPos
+        recenterBallVisualIfNeeded(cueBall)
+        alignVisualCenter(of: cueBall, to: cueBallPos)
+
+        let worldTransform = anchorMesh.worldTransform
+        let col0 = simd_float3(worldTransform.m11, worldTransform.m12, worldTransform.m13)
+        let worldScale = simd_length(col0)
+        let physRadius = worldScale > 0.001 ? CGFloat(BallPhysics.radius / worldScale) : CGFloat(BallPhysics.radius)
+        let physicsBody = SCNPhysicsBody(
+            type: .dynamic,
+            shape: SCNPhysicsShape(geometry: SCNSphere(radius: physRadius), options: nil)
+        )
+        physicsBody.mass = CGFloat(BallPhysics.mass)
+        physicsBody.restitution = CGFloat(BallPhysics.restitution)
+        physicsBody.friction = CGFloat(BallPhysics.friction)
+        physicsBody.rollingFriction = CGFloat(BallPhysics.rollingDamping)
+        physicsBody.angularDamping = CGFloat(BallPhysics.angularDamping)
+        physicsBody.damping = CGFloat(BallPhysics.linearDamping)
+        physicsBody.isAffectedByGravity = false
+        cueBall.physicsBody = physicsBody
+
+        rootNode.addChildNode(cueBall)
+        cueBallNode = cueBall
+        initialBallPositions["cueBall"] = cueBallPos
+        allBallNodes["cueBall"] = cueBall
+        print("[BilliardScene] 白球(cueball.usdz) 已加载，位于置球点: \(cueBallPos)")
     }
     
     /// 增强所有球体的 PBR 材质 + 接触阴影

@@ -105,7 +105,7 @@ final class CameraRig {
 
         targetPivot = SCNVector3(0, tableSurfaceY, 0)
         targetZoom = 0
-        targetYaw = .pi
+        targetYaw = 0
         currentPivot = targetPivot
         currentZoom = targetZoom
         currentYaw = targetYaw

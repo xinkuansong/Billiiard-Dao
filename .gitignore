@@ -1,2 +1,4 @@
 .cursor/
 .specstory/
+.DS_Store
+*.xcuserstate
