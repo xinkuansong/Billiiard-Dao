@@ -55,6 +55,13 @@
 | `TrainingCameraConfig.autoAlignEnabled` | 功能开关 | 配置常量 | 控制自动对齐是否启用 |
 | `TrainingCameraConfig.returnToAimDuration` | 回归动画时长（秒） | 配置常量 | 影响 `ReturnToAim` 动画时长 |
 | `TrainingCameraConfig.cameraTransitionSpeed` | 相机过渡速度 | 配置常量 | 影响相机动画的平滑度 |
+| `TrainingCameraConfig.globalObservationPitchRad` | -60° (弧度) | 全局观察俯角 | 影响全局环绕视角高度 |
+| `TrainingCameraConfig.globalObservationRadius` | 1.5m | 全局观察水平轨道半径 | 影响相机水平偏移 |
+| `TrainingCameraConfig.globalObservationHeight` | 1.8m | 全局观察相机高度（相对台面） | 影响全局视角垂直位置，通过 SmoothPose.height 显式设置 |
+| `TrainingCameraConfig.globalObservationFov` | 50° | 全局观察 FOV | 影响全局视野宽度 |
+| `TrainingCameraConfig.globalObservationYawSensitivity` | 0.005 | 全局观察旋转灵敏度 | 影响环绕操作手感 |
+| `TrainingCameraConfig.globalObservationMinRadius` | 0.8m | 全局观察最小缩放半径 | Pinch 缩放下限 |
+| `TrainingCameraConfig.globalObservationMaxRadius` | 3.0m | 全局观察最大缩放半径 | Pinch 缩放上限 |
 
 ## 状态机 / 事件模型
 
@@ -73,6 +80,16 @@ ReturnToAim --[returnAnimationCompleted]--> Aiming
 - **Aiming（瞄准）**：默认状态，用户可水平滑动瞄准，垂直滑动进入 Adjusting
 - **Adjusting（调整视角）**：垂直滑动调整 zoom（第一人称/第三人称），滑动结束后返回 Aiming
 - **Shooting（击球中）**：击球瞬间，保存瞄准上下文，等待球开始移动
+
+### 全局观察模式（正交于状态机）
+
+全局观察模式通过 `CameraContext.isGlobalObservation` 布尔标志实现，不是状态机中的状态，而是一个独立的模态覆盖层：
+
+- **进入**：任意状态下均可进入（非 2D 俯视时），保存当前相机 pose 和 mode，动画过渡到球桌中心环绕视角
+- **期间**：底层状态机正常运转（球继续移动/停止/切状态），但相机状态驱动更新被屏蔽，仅执行 `CameraRig.update()` 驱动 smoothToPose 过渡
+- **退出**：根据退出时的底层状态（可能已发生变化）恢复到合适的相机 pose
+- **手势**：水平 Pan → yaw 旋转（360°无限制）；Pinch → radius 缩放；垂直 Pan 不响应；Tap 不响应球选择
+- **UI**：全局按钮高亮，观察/瞄准按钮置灰不可点，力度条禁用，球杆隐藏
 - **Observing（观察）**：球移动过程中，相机切换到观察视角，用户可手动旋转/缩放
 - **ReturnToAim（回归瞄准）**：球停后，相机动画回归到瞄准视角
 

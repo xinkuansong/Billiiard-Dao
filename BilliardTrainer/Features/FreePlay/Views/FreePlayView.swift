@@ -76,6 +76,18 @@ struct FreePlayView: View {
                     // View toggle buttons
                     if showGameControls && !viewModel.sceneViewModel.isTopDownView {
                         VStack(spacing: 8) {
+                            // 全局观察按钮（暂时隐藏，功能代码保留）
+                            // Button {
+                            //     viewModel.sceneViewModel.toggleGlobalObservation()
+                            // } label: {
+                            //     Image(systemName: "globe")
+                            //         .font(.title3)
+                            //         .foregroundColor(viewModel.sceneViewModel.isGlobalObservation ? .yellow : .white)
+                            //         .frame(width: 40, height: 40)
+                            //         .background(.ultraThinMaterial)
+                            //         .clipShape(Circle())
+                            // }
+
                             Button {
                                 viewModel.sceneViewModel.switchToObservationView()
                             } label: {

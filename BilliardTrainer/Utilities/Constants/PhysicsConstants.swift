@@ -284,6 +284,16 @@ struct TrainingCameraConfig {
     static let observationZoom: Float = 1.0
     static let observationFollowsCueBall: Bool = false
 
+    // MARK: 全局观察视角（球桌中心环绕）
+    // pitch 由 height/radius 几何关系自动计算（SmoothPose.height != nil 时），此值仅用于过渡动画插值
+    static let globalObservationPitchRad: Float = -30 * .pi / 180
+    static let globalObservationRadius: Float = 2.0
+    static let globalObservationHeight: Float = 1.2
+    static let globalObservationFov: CGFloat = 50
+    static let globalObservationYawSensitivity: Float = 0.005
+    static let globalObservationMinRadius: Float = 0.8
+    static let globalObservationMaxRadius: Float = 3.0
+
     // MARK: 过渡动画
     static let returnToAimDuration: Float = 0.5
     static let transitionDuration: Double = 0.5

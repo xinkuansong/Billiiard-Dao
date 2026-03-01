@@ -68,6 +68,7 @@ final class RenderQualityManager {
 
     private init() {
         let detectedTier = RenderQualityManager.detectTier()
+        deviceTier = detectedTier
         currentTier = detectedTier
         featureFlags = RenderQualityManager.flags(for: detectedTier)
     }
@@ -285,6 +286,50 @@ final class RenderQualityManager {
         consecutiveHighFPSWindows = 0
         tierChangeCooldownUntil = CACurrentMediaTime() + tierChangeCooldown
         overrides.removeAll()
+    }
+
+    // MARK: - Recovery
+
+    private let deviceTier: RenderTier
+    private var pendingRecovery = false
+    private var recoveryEvalStart: CFTimeInterval = 0
+    private var recoveryFrameTimes: [CFTimeInterval] = []
+    private let recoveryStabilizationDelay: CFTimeInterval = 2.0
+    private let recoveryWindowSize = 30
+
+    /// Called when trajectory playback ends (balls at rest) to re-evaluate quality.
+    func requestUpgradeEvaluation() {
+        guard currentTier < deviceTier else { return }
+        pendingRecovery = true
+        recoveryEvalStart = CACurrentMediaTime() + recoveryStabilizationDelay
+        recoveryFrameTimes.removeAll()
+        print("[RenderQuality] 🔄 Recovery scheduled, target=\(deviceTier)")
+    }
+
+    /// Feed frame times during recovery evaluation. Returns true if tier changed.
+    func evaluateRecoveryFrame(_ dt: CFTimeInterval) -> Bool {
+        guard pendingRecovery else { return false }
+        let now = CACurrentMediaTime()
+        guard now >= recoveryEvalStart else { return false }
+
+        recoveryFrameTimes.append(dt)
+        guard recoveryFrameTimes.count >= recoveryWindowSize else { return false }
+
+        let avgFPS = 1.0 / (recoveryFrameTimes.reduce(0, +) / Double(recoveryFrameTimes.count))
+        recoveryFrameTimes.removeAll()
+        pendingRecovery = false
+
+        let threshold = upgradeThreshold(for: currentTier) - 6.0
+        if avgFPS > threshold, currentTier < deviceTier {
+            recentFrameTimes.removeAll()
+            consecutiveLowFPSWindows = 0
+            consecutiveHighFPSWindows = 0
+            tierChangeCooldownUntil = now + tierChangeCooldown
+            print("[RenderQuality] ✅ Recovery upgrade: avgFPS=\(String(format: "%.1f", avgFPS)), threshold=\(String(format: "%.1f", threshold))")
+            return upgradeOneTier(avgFPS: avgFPS)
+        }
+        print("[RenderQuality] ⏸️ Recovery skipped: avgFPS=\(String(format: "%.1f", avgFPS)) < threshold=\(String(format: "%.1f", threshold))")
+        return false
     }
 }
 

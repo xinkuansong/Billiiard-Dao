@@ -22,10 +22,11 @@
 | 术语 | 含义 |
 |------|------|
 | CameraState | 相机状态：aiming（瞄准）、adjusting（调整视角）、shooting（击球中）、observing（观察）、returnToAim（回归瞄准） |
-| CameraContext | 相机上下文：包含 mode（aim3D/observe3D/topDown2D）、phase（ballPlacement/aiming/shotRunning/postShot）、interaction（none/draggingCueBall/draggingTargetBall/rotatingCamera）等 |
+| CameraContext | 相机上下文：包含 mode（aim3D/observe3D/topDown2D）、phase（ballPlacement/aiming/shotRunning/postShot）、interaction（none/draggingCueBall/draggingTargetBall/rotatingCamera）、isGlobalObservation（全局观察覆盖层）等 |
 | CameraPose | 相机姿态：yaw（世界 Y 轴弧度）、pitch（yawNode 局部 X 轴弧度）、radius（pivot 到 camera 的轨道距离）、pivot（世界坐标） |
 | CameraIntent | 相机意图：由 InputRouter 将手势转换为相机操作意图（dragCueBall/selectTarget/rotateYaw/zoom 等） |
 | PivotAnchor | 枢轴锚点：cueBall（白球）、tableCenter（台面中心）、fixedPoint（固定点）、selectedBall（选中球） |
+| 全局观察模式 | 正交于状态机的模态覆盖层（isGlobalObservation），pivot 固定球桌中心，仅支持水平旋转和 Pinch 缩放，可从任意状态进入/退出 |
 | 动态灵敏度 | 根据瞄准方向前方是否有目标球，自动调整水平滑动灵敏度（有球区域低灵敏度，无球区域高灵敏度） |
 | 软限制（soft clamp） | 观察模式下 pivot 超出边界时的软性回拉（factor=0.2），避免硬性截断导致的视角跳跃 |
 | 用户接管标志 | 观察模式下用户手动旋转/缩放相机后，系统不再自动调整视角 |

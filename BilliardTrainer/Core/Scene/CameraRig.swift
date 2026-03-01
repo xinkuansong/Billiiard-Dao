@@ -15,6 +15,8 @@ final class CameraRig {
         var radius: Float
         var pivot: SCNVector3
         var fov: CGFloat
+        /// 显式高度（相对台面），nil 时从 zoom 推导
+        var height: Float?
     }
 
     struct Config {
@@ -228,6 +230,33 @@ final class CameraRig {
         activeSmoothTransition = nil
     }
 
+    /// 直接更新 smooth pose 的 yaw（不触发 disableSmoothPoseControl）
+    func applySmoothYawDelta(_ delta: Float, sensitivity: Float) {
+        let yawDelta = delta * sensitivity
+        activeSmoothTransition = nil
+        if var pose = targetSmoothPose {
+            pose.yaw += yawDelta
+            targetSmoothPose = pose
+        }
+        if var pose = currentSmoothPose {
+            pose.yaw += yawDelta
+            currentSmoothPose = pose
+        }
+    }
+
+    /// 直接更新 smooth pose 的 radius（不触发 disableSmoothPoseControl）
+    func applySmoothRadiusDelta(_ delta: Float, minRadius: Float, maxRadius: Float) {
+        activeSmoothTransition = nil
+        if var pose = targetSmoothPose {
+            pose.radius = max(minRadius, min(maxRadius, pose.radius + delta))
+            targetSmoothPose = pose
+        }
+        if var pose = currentSmoothPose {
+            pose.radius = max(minRadius, min(maxRadius, pose.radius + delta))
+            currentSmoothPose = pose
+        }
+    }
+
     /// 计算给定参数下的摄像机世界坐标（用于距离估算）
     private func cameraWorldPosition(pivot: SCNVector3, zoom: Float, yaw: Float) -> SCNVector3 {
         let z = clampZoom(zoom)
@@ -253,12 +282,21 @@ final class CameraRig {
             let progress = min(1.0, transition.elapsed / transition.duration)
             let t = smoothStep(progress)
 
+            let interpolatedHeight: Float? = {
+                guard let endH = transition.end.height else { return transition.start.height }
+                let startH = transition.start.height ?? {
+                    let z = zoomForRadius(max(config.minDistance, transition.start.radius))
+                    return lerp(config.minHeight, config.maxHeight, z)
+                }()
+                return lerp(startH, endH, t)
+            }()
             currentSmoothPose = SmoothPose(
                 yaw: transition.start.yaw + shortestAngleDelta(from: transition.start.yaw, to: transition.end.yaw) * t,
                 pitch: lerp(transition.start.pitch, transition.end.pitch, t),
                 radius: lerp(transition.start.radius, transition.end.radius, t),
                 pivot: transition.start.pivot + (transition.end.pivot - transition.start.pivot) * t,
-                fov: CGFloat(lerp(Float(transition.start.fov), Float(transition.end.fov), t))
+                fov: CGFloat(lerp(Float(transition.start.fov), Float(transition.end.fov), t)),
+                height: interpolatedHeight
             )
 
             activeSmoothTransition = transition
@@ -282,12 +320,18 @@ final class CameraRig {
             )
             let frameScale = max(0.25, min(2.0, deltaTime * 60))
             let t = min(1, config.dampingFactor * frameScale)
+            let dampedHeight: Float? = {
+                guard let targetH = targetPose.height else { return nil }
+                let currentH = currentPose.height ?? targetH
+                return lerp(currentH, targetH, t)
+            }()
             currentSmoothPose = SmoothPose(
                 yaw: currentPose.yaw + shortestAngleDelta(from: currentPose.yaw, to: targetPose.yaw) * t,
                 pitch: lerp(currentPose.pitch, targetPose.pitch, t),
                 radius: lerp(currentPose.radius, targetPose.radius, t),
                 pivot: currentPose.pivot + (targetPose.pivot - currentPose.pivot) * t,
-                fov: CGFloat(lerp(Float(currentPose.fov), Float(targetPose.fov), t))
+                fov: CGFloat(lerp(Float(currentPose.fov), Float(targetPose.fov), t)),
+                height: dampedHeight
             )
             if let pose = currentSmoothPose {
                 syncOrbitState(with: pose)
@@ -332,6 +376,10 @@ final class CameraRig {
         return clampZoom((clampedRadius - config.minRadius) / denom)
     }
 
+    func fovForZoom(_ zoom: Float) -> CGFloat {
+        CGFloat(lerp(Float(config.aimFov), Float(config.standFov), max(0, min(1, zoom))))
+    }
+
     /// 五阶 smootherstep 缓动：起止更柔和，减少视角切换卡顿感
     private func smoothStep(_ t: Float) -> Float {
         let x = max(0, min(1, t))
@@ -369,9 +417,14 @@ final class CameraRig {
 
     private func applySmoothPoseTransform(_ pose: SmoothPose) {
         let clampedRadius = max(config.minDistance, pose.radius)
-        let mappedZoom = zoomForRadius(clampedRadius)
-        let desiredHeight = lerp(config.minHeight, config.maxHeight, mappedZoom)
-        let cameraY = max(tableSurfaceY + config.minHeightAboveTable, tableSurfaceY + desiredHeight)
+        let cameraY: Float
+        if let explicitHeight = pose.height {
+            cameraY = tableSurfaceY + max(config.minHeightAboveTable, explicitHeight)
+        } else {
+            let mappedZoom = zoomForRadius(clampedRadius)
+            let desiredHeight = lerp(config.minHeight, config.maxHeight, mappedZoom)
+            cameraY = max(tableSurfaceY + config.minHeightAboveTable, tableSurfaceY + desiredHeight)
+        }
 
         let forwardXZ = SCNVector3(-cosf(pose.yaw), 0, -sinf(pose.yaw))
         let position = SCNVector3(
@@ -382,8 +435,16 @@ final class CameraRig {
         let lookDir = (pose.pivot - position).normalized()
         let yawEuler = atan2f(-lookDir.x, -lookDir.z)
 
+        let effectivePitch: Float
+        if pose.height != nil {
+            let hDist = sqrtf(lookDir.x * lookDir.x + lookDir.z * lookDir.z)
+            effectivePitch = atan2f(lookDir.y, hDist)
+        } else {
+            effectivePitch = pose.pitch
+        }
+
         cameraNode.position = position
-        cameraNode.eulerAngles = SCNVector3(pose.pitch, yawEuler, 0)
+        cameraNode.eulerAngles = SCNVector3(effectivePitch, yawEuler, 0)
         cameraNode.eulerAngles.z = 0
         cameraNode.camera?.fieldOfView = pose.fov
     }

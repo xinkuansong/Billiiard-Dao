@@ -1501,6 +1501,54 @@ class BilliardScene: SCNScene {
         )
     }
 
+    // MARK: - Global Observation (球桌中心环绕)
+
+    func enterGlobalObservation() {
+        guard let cameraRig else { return }
+        let tableCenterPivot = SCNVector3(0, TablePhysics.height, 0)
+        let targetPose = CameraRig.SmoothPose(
+            yaw: cameraRig.yaw,
+            pitch: TrainingCameraConfig.globalObservationPitchRad,
+            radius: TrainingCameraConfig.globalObservationRadius,
+            pivot: tableCenterPivot,
+            fov: TrainingCameraConfig.globalObservationFov,
+            height: TrainingCameraConfig.globalObservationHeight
+        )
+        cameraRig.smoothToPose(targetPose, duration: 0.6)
+    }
+
+    func exitGlobalObservation(to restorePose: CameraPose?) {
+        guard let cameraRig else { return }
+        if let pose = restorePose {
+            let fov = cameraRig.fovForZoom(cameraRig.zoomForRadius(pose.radius))
+            let target = CameraRig.SmoothPose(
+                yaw: pose.yaw,
+                pitch: pose.pitch,
+                radius: pose.radius,
+                pivot: pose.pivot,
+                fov: fov
+            )
+            cameraRig.smoothToPose(target, duration: 0.6)
+        }
+    }
+
+    func handleGlobalObservationPan(deltaX: Float) {
+        cameraRig?.applySmoothYawDelta(
+            deltaX,
+            sensitivity: TrainingCameraConfig.globalObservationYawSensitivity
+        )
+    }
+
+    func handleGlobalObservationPinch(scale: Float) {
+        guard let cameraRig else { return }
+        let pinchDelta = (1 - max(0.01, scale)) * TrainingCameraConfig.zoomPinchSensitivity * 2.0
+        cameraRig.applySmoothRadiusDelta(
+            pinchDelta,
+            minRadius: TrainingCameraConfig.globalObservationMinRadius,
+            maxRadius: TrainingCameraConfig.globalObservationMaxRadius
+        )
+    }
+
     private func clampPivotToTable(_ pivot: SCNVector3) -> SCNVector3 {
         let margin = BallPhysics.radius * 1.2
         let halfL = TablePhysics.innerLength * 0.5 - margin
@@ -2003,10 +2051,23 @@ class BilliardScene: SCNScene {
     }
 
     /// Reapply all rendering settings to reflect current tier / overrides.
-    func reapplyRenderSettings() {
-        setupEnvironment()
+    /// - Parameter deferMaterials: When true, heavy material work is deferred
+    ///   to avoid blocking the current frame (used during auto quality changes).
+    func reapplyRenderSettings(deferMaterials: Bool = false) {
         reapplyLightSettings()
         reapplyCameraSettings()
+
+        if deferMaterials {
+            DispatchQueue.main.async { [weak self] in
+                self?.reapplyMaterialsAndEnvironment()
+            }
+        } else {
+            reapplyMaterialsAndEnvironment()
+        }
+    }
+
+    private func reapplyMaterialsAndEnvironment() {
+        setupEnvironment()
         enhanceBallMaterials()
         MaterialFactory.enhanceClothMaterials(in: tableNode)
         MaterialFactory.enhanceRailMaterials(in: tableNode)

@@ -11,7 +11,8 @@
 - [ ] 共享常量/状态：`TrainingCameraConfig`（灵敏度、过渡速度、功能开关）、`TablePhysics`（台面尺寸）、`BallPhysics`（球半径）
 - [ ] UI 交互链：水平滑动瞄准、垂直滑动调整视角、点击选择目标球、观察模式下的旋转/缩放手势
 - [ ] 持久化/数据映射：无（相机状态不持久化）
-- [ ] 配置/开关：`TrainingCameraConfig.observationViewEnabled`、`TrainingCameraConfig.autoAlignEnabled`
+- [ ] 配置/开关：`TrainingCameraConfig.observationViewEnabled`、`TrainingCameraConfig.autoAlignEnabled`、全局观察相机参数（`globalObservation*`）
+- [ ] 全局观察覆盖层：`CameraContext.isGlobalObservation`、`BilliardSceneViewModel.isGlobalObservation`、`FreePlayView` 全局观察按钮
 
 ## 最小回归门禁
 
@@ -28,6 +29,14 @@
 - [ ] **自动对齐流程**：球停后（功能开启时）→ 相机自动对齐最近可击打球方向 → 功能关闭时使用 fallback 方向
 - [ ] **观察模式软限制**：观察模式下手动旋转相机使 pivot 超出边界 → 软限制生效，pivot 缓慢回拉 → 不会硬性截断
 - [ ] **用户接管标志**：观察模式下手动旋转相机 → `userHasTakenOverCamera` 标志置为 true → 系统不再自动调整视角 → 选择目标球后标志重置
+
+### 全局观察模式验证
+
+- [ ] **从瞄准态进入/退出**：点击全局观察按钮 → 动画过渡到球桌中心俯瞰 → 左右滑动旋转 → Pinch 缩放 → 再次点击退出 → 恢复瞄准视角
+- [ ] **从观察态进入/退出**：击球后观察态下点击全局按钮 → 进入全局视角 → 球停后底层状态变化 → 退出全局 → 恢复到观察态
+- [ ] **球运动中使用**：击球后球在移动时进入全局观察 → 球继续运动（轨迹回放不中断）→ 退出后视角恢复
+- [ ] **UI 状态正确**：全局模式下全局按钮高亮、观察/瞄准按钮置灰不可点、力度条不可用
+- [ ] **2D/3D 切换兼容**：全局模式下切换到 2D → 全局模式自动退出 → 2D 俯视正常
 
 ## 测试入口
 
@@ -71,3 +80,4 @@
 |------|----------|----------|----------|
 | 2026-02-27 | 初始文档创建 | 通过（新建文档） | 无 |
 | 2026-03-01 | 修复初始 yaw 方向：CameraRig init yaw 从 π 改为 0，CameraContext.default.savedAimPose.yaw 从 π 改为 0，ViewModel 初始 aimDirection 从 (1,0,0) 改为 (-1,0,0)。修复后相机从白球后方看向球堆（-X 方向），符合台球击球视角 | 代码级检查通过：现有测试已使用 aimDirection=(-1,0,0)，与修改一致 | 待真机验证：初始视角正确性、瞄准旋转跟手性、观察视角切换 |
+| 2026-03-02 | 新增全局观察模式：正交于状态机的模态覆盖层（isGlobalObservation），支持任意状态进入/退出。改动：PhysicsConstants、CameraStateMachine、BilliardScene、BilliardSceneView、CameraRig、FreePlayView | 编译通过，无 lint 错误 | 待真机验证：过渡动画流畅度、缩放手感、各状态进入退出恢复正确性、球运动中全局观察不中断轨迹回放 |

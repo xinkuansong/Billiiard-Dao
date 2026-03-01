@@ -66,6 +66,13 @@ struct CameraContext {
     var observePocketId: String?
     var observePocketPosition: SCNVector3?
 
+    /// 全局观察模式：正交于状态机的模态覆盖层
+    var isGlobalObservation: Bool = false
+    /// 进入全局观察前保存的相机 pose，用于退出时恢复
+    var savedPoseBeforeGlobal: CameraPose?
+    /// 进入全局观察前保存的 presentation mode
+    var savedModeBeforeGlobal: CameraPresentationMode?
+
     static let `default` = CameraContext(
         mode: .aim3D,
         phase: .aiming,
@@ -84,7 +91,10 @@ struct CameraContext {
         observeTargetBallId: nil,
         observeTargetBallPosition: nil,
         observePocketId: nil,
-        observePocketPosition: nil
+        observePocketPosition: nil,
+        isGlobalObservation: false,
+        savedPoseBeforeGlobal: nil,
+        savedModeBeforeGlobal: nil
     )
 }
 
@@ -119,6 +129,7 @@ struct InputRouter {
             return .none
         }
         if hit.isUI { return .none }
+        if context.isGlobalObservation { return .none }
         if hit.isBall,
            context.phase == .aiming,
            hit.isTargetBall,
@@ -133,6 +144,11 @@ struct InputRouter {
             return .none
         }
         if startHit.isUI { return .none }
+
+        if context.isGlobalObservation {
+            return .rotateYaw(input.deltaX)
+        }
+
         if startHit.isBall, context.phase == .ballPlacement, startHit.isCueBall {
             return .dragCueBall
         }

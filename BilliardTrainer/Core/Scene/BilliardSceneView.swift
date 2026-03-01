@@ -159,7 +159,9 @@ struct BilliardSceneView: UIViewRepresentable {
             let flags = manager.featureFlags
             view.antialiasingMode = flags.antialiasingMode
             view.preferredFramesPerSecond = min(flags.maxFPS, UIScreen.main.maximumFramesPerSecond)
-            viewModel.scene.reapplyRenderSettings()
+
+            let isAutoChange = !force && lastAppliedRenderTier != nil
+            viewModel.scene.reapplyRenderSettings(deferMaterials: isAutoChange)
             lastAppliedRenderTier = tier
         }
         
@@ -177,6 +179,9 @@ struct BilliardSceneView: UIViewRepresentable {
                 let dt = max(1.0 / 240.0, min(1.0 / 20.0, now - last))
                 deltaTime = Float(dt)
                 _ = RenderQualityManager.shared.recordFrameTime(dt)
+                if RenderQualityManager.shared.evaluateRecoveryFrame(dt) {
+                    applyRenderQualityIfNeeded(force: true)
+                }
             } else {
                 deltaTime = 1.0 / 60.0
             }
@@ -196,6 +201,8 @@ struct BilliardSceneView: UIViewRepresentable {
 
             if isTopDown {
                 viewModel.scene.updateTopDownZoom()
+            } else if viewModel.isGlobalObservation {
+                viewModel.scene.cameraRig?.update(deltaTime: deltaTime)
             } else {
                 if (camState == .aiming || camState == .adjusting) && viewModel.gameState == .aiming {
                     viewModel.scene.setAimDirectionForCamera(viewModel.aimDirection)
@@ -326,6 +333,10 @@ struct BilliardSceneView: UIViewRepresentable {
             case .dragCueBall:
                 handlePlacingPan(gesture: gesture, in: view)
             case .rotateYaw(let deltaX):
+                if viewModel.isGlobalObservation {
+                    viewModel.scene.handleGlobalObservationPan(deltaX: deltaX)
+                    return
+                }
                 guard viewModel.gameState == .aiming else { return }
                 if let aimCtrl = viewModel.scene.aimingController,
                    let cueBall = viewModel.scene.cueBallNode {
@@ -446,7 +457,9 @@ struct BilliardSceneView: UIViewRepresentable {
             guard gesture.state == .changed else { return }
             let intent = inputRouter.routePinch(scale: Float(gesture.scale), context: viewModel.cameraContext)
             if case .zoom(let scale) = intent {
-                if viewModel.cameraContext.mode == .observe3D {
+                if viewModel.isGlobalObservation {
+                    viewModel.scene.handleGlobalObservationPinch(scale: scale)
+                } else if viewModel.cameraContext.mode == .observe3D {
                     viewModel.cameraContext.interaction = .rotatingCamera
                     viewModel.scene.observationController?.handleObservationPinch(scale: scale)
                 } else {
@@ -780,6 +793,8 @@ class BilliardSceneViewModel: ObservableObject {
         // 先进入回合结束状态
         gameState = .turnEnd
         cameraContext.phase = .postShot
+
+        RenderQualityManager.shared.requestUpgradeEvaluation()
 
         // 通知摄像状态机：球停止
         scene.cameraStateMachine.handleEvent(.ballsStopped)
@@ -1408,6 +1423,13 @@ class BilliardSceneViewModel: ObservableObject {
 
     /// 2D/3D 视角切换
     func toggleViewMode() {
+        if isGlobalObservation {
+            isGlobalObservation = false
+            cameraContext.isGlobalObservation = false
+            cameraContext.savedPoseBeforeGlobal = nil
+            cameraContext.savedModeBeforeGlobal = nil
+        }
+
         cameraContext.transition = TransitionState(isActive: true, locksCameraInput: true)
         let unlockDelay = 0.55
         DispatchQueue.main.asyncAfter(deadline: .now() + unlockDelay) { [weak self] in
@@ -1430,6 +1452,7 @@ class BilliardSceneViewModel: ObservableObject {
     // MARK: - View Switching (Observation / Aiming)
     
     @Published private(set) var isInObservationView: Bool = false
+    @Published private(set) var isGlobalObservation: Bool = false
 
     private enum CameraTrajectoryMode {
         case observation
@@ -1484,7 +1507,109 @@ class BilliardSceneViewModel: ObservableObject {
         scene.setAimDirectionForCamera(aimDirection)
         applyCameraTrajectory(.aiming, animated: true, speed: TrainingCameraConfig.cameraTransitionSpeed)
     }
-    
+
+    // MARK: - Global Observation (球桌中心环绕)
+
+    func toggleGlobalObservation() {
+        guard !isTopDownView else { return }
+        if isGlobalObservation {
+            exitGlobalObservation()
+        } else {
+            enterGlobalObservation()
+        }
+    }
+
+    private func enterGlobalObservation() {
+        let savedPose = scene.captureCurrentCameraPose()
+        let savedMode = cameraContext.mode
+
+        cameraContext.isGlobalObservation = true
+        cameraContext.savedPoseBeforeGlobal = savedPose
+        cameraContext.savedModeBeforeGlobal = savedMode
+        isGlobalObservation = true
+
+        cueStick?.hide()
+        scene.hideAimLine()
+        scene.hidePredictedTrajectory()
+
+        scene.enterGlobalObservation()
+    }
+
+    private func exitGlobalObservation() {
+        isGlobalObservation = false
+        cameraContext.isGlobalObservation = false
+
+        let currentCamState = scene.cameraStateMachine.currentState
+        let restorePose = resolveRestorePose(for: currentCamState)
+
+        scene.exitGlobalObservation(to: restorePose)
+
+        cameraContext.savedPoseBeforeGlobal = nil
+        cameraContext.savedModeBeforeGlobal = nil
+
+        if currentCamState == .aiming && gameState == .aiming {
+            cueStick?.show()
+        }
+    }
+
+    /// 根据退出时的底层状态，决定恢复到什么 pose
+    private func resolveRestorePose(for camState: CameraState) -> CameraPose? {
+        switch camState {
+        case .aiming, .adjusting:
+            if let saved = cameraContext.savedPoseBeforeGlobal,
+               cameraContext.savedModeBeforeGlobal == .aim3D {
+                if let cueBall = scene.cueBallNode {
+                    let pos = scene.visualCenter(of: cueBall)
+                    return CameraPose(
+                        yaw: saved.yaw,
+                        pitch: saved.pitch,
+                        radius: saved.radius,
+                        pivot: SCNVector3(pos.x, TablePhysics.height, pos.z)
+                    )
+                }
+                return saved
+            }
+            if let cueBall = scene.cueBallNode {
+                let pos = scene.visualCenter(of: cueBall)
+                return CameraPose(
+                    yaw: cameraContext.savedAimPose.yaw,
+                    pitch: TrainingCameraConfig.aimPitchRad,
+                    radius: TrainingCameraConfig.aimRadius,
+                    pivot: SCNVector3(pos.x, TablePhysics.height, pos.z)
+                )
+            }
+            return cameraContext.savedPoseBeforeGlobal
+
+        case .observing, .shooting:
+            if let saved = cameraContext.savedPoseBeforeGlobal,
+               cameraContext.savedModeBeforeGlobal == .observe3D {
+                return saved
+            }
+            if let cueBall = scene.cueBallNode {
+                let pos = scene.visualCenter(of: cueBall)
+                return CameraPose(
+                    yaw: cameraContext.savedAimPose.yaw,
+                    pitch: TrainingCameraConfig.standPitchRad,
+                    radius: TrainingCameraConfig.standRadius,
+                    pivot: SCNVector3(pos.x, TablePhysics.height, pos.z)
+                )
+            }
+            return cameraContext.savedPoseBeforeGlobal
+
+        case .returnToAim:
+            if let cueBall = scene.cueBallNode {
+                let pos = scene.visualCenter(of: cueBall)
+                return CameraPose(
+                    yaw: cameraContext.savedAimPose.yaw,
+                    pitch: TrainingCameraConfig.aimPitchRad,
+                    radius: TrainingCameraConfig.aimRadius,
+                    pivot: SCNVector3(pos.x, TablePhysics.height, pos.z)
+                )
+            }
+            return cameraContext.savedPoseBeforeGlobal
+        }
+    }
+
     // MARK: - Event Handlers
     
     /// 处理点击事件

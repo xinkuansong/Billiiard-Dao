@@ -13,6 +13,16 @@ import simd
 
 final class EnvironmentLightingManager {
 
+    // MARK: - Cube Map Cache
+
+    private static var cachedIBL: (tier: RenderTier, images: [UIImage])?
+    private static var cachedBackground: (tier: RenderTier, images: [UIImage])?
+
+    static func invalidateCache() {
+        cachedIBL = nil
+        cachedBackground = nil
+    }
+
     // MARK: - Public API
 
     static func apply(to scene: SCNScene, tier: RenderTier) {
@@ -23,14 +33,29 @@ final class EnvironmentLightingManager {
             scene.lightingEnvironment.contents = hdrURL
             scene.lightingEnvironment.intensity = 0.88
             scene.lightingEnvironment.contentsTransform = SCNMatrix4MakeRotation(.pi * 0.25, 0, 1, 0)
-            scene.background.contents = generateBackgroundCubeMap(size: 256)
+            let bg = cachedBackground(for: tier, size: 256)
+            scene.background.contents = bg
             return
         }
 
         let mapSize = max(256, flags.environmentMapSize)
-        scene.lightingEnvironment.contents = generateIBLCubeMap(size: mapSize)
+        scene.lightingEnvironment.contents = cachedIBL(for: tier, size: mapSize)
         scene.lightingEnvironment.intensity = 0.88
-        scene.background.contents = generateBackgroundCubeMap(size: mapSize)
+        scene.background.contents = cachedBackground(for: tier, size: mapSize)
+    }
+
+    private static func cachedIBL(for tier: RenderTier, size: Int) -> [UIImage] {
+        if let cached = cachedIBL, cached.tier == tier { return cached.images }
+        let images = generateIBLCubeMap(size: size)
+        cachedIBL = (tier, images)
+        return images
+    }
+
+    private static func cachedBackground(for tier: RenderTier, size: Int) -> [UIImage] {
+        if let cached = cachedBackground, cached.tier == tier { return cached.images }
+        let images = generateBackgroundCubeMap(size: size)
+        cachedBackground = (tier, images)
+        return images
     }
 
     static func switchPreset(_ preset: EnvironmentPreset, scene: SCNScene) {
