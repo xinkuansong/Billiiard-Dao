@@ -205,6 +205,9 @@ class EventDrivenEngine {
     // Resolved events history (for game rules and audio)
     private(set) var resolvedEvents: [PhysicsEventType] = []
 
+    /// 每个 resolvedEvent 对应的绝对模拟时间（与 resolvedEvents 等长，下标一一对应）
+    private(set) var resolvedEventTimes: [Float] = []
+
     /// 首次球-球碰撞的模拟时间（用于相机延迟切换观察视角）
     private(set) var firstBallBallCollisionTime: Float?
     
@@ -544,7 +547,10 @@ class EventDrivenEngine {
             }
         }
         
-        // Find ball-pocket events (CCD quartic solve)
+        // Find ball-pocket events (CCD quartic solve, XZ-plane only)
+        // 注意：必须使用 XZ 2D 分量，不含 Y。
+        // 原因：球心 Y 固定高于台面 BallPhysics.radius，而 r = pocket.radius - BallPhysics.radius < BallPhysics.radius，
+        // 若使用 3D 向量，dp.y 恒大于 r，四次方程永远无实数根，进袋事件永远不触发。
         for (name, ball) in balls {
             guard !ball.isPocketed else { continue }
             
@@ -553,24 +559,31 @@ class EventDrivenEngine {
             // Check each pocket
             for pocket in tableGeometry.pockets {
                 let r = max(pocket.radius - BallPhysics.radius, 0.0)
-                let dp = ball.position - pocket.center
-                let dv = ball.velocity
-                let da = a
-                let halfDa = da * 0.5
-                
-                let halfDaDotHalfDa = Double(halfDa.dot(halfDa))
-                let dvDotHalfDa = Double(dv.dot(halfDa))
-                let dvDotDv = Double(dv.dot(dv))
-                let dpDotHalfDa = Double(dp.dot(halfDa))
-                let dpDotDv = Double(dp.dot(dv))
-                let dpDotDp = Double(dp.dot(dp))
-                
+
+                // XZ-only: 袋口检测在水平面进行，忽略 Y 轴高度差
+                let dpX = ball.position.x - pocket.center.x
+                let dpZ = ball.position.z - pocket.center.z
+                let dvX = ball.velocity.x
+                let dvZ = ball.velocity.z
+                let daX = a.x
+                let daZ = a.z
+
+                let halfDaX = daX * 0.5
+                let halfDaZ = daZ * 0.5
+
+                let halfDaDotHalfDa = Double(halfDaX * halfDaX + halfDaZ * halfDaZ)
+                let dvDotHalfDa    = Double(dvX * halfDaX + dvZ * halfDaZ)
+                let dvDotDv        = Double(dvX * dvX + dvZ * dvZ)
+                let dpDotHalfDa    = Double(dpX * halfDaX + dpZ * halfDaZ)
+                let dpDotDv        = Double(dpX * dvX + dpZ * dvZ)
+                let dpDotDp        = Double(dpX * dpX + dpZ * dpZ)
+
                 let a4 = halfDaDotHalfDa
                 let a3 = 2.0 * dvDotHalfDa
                 let a2 = dvDotDv + 2.0 * dpDotHalfDa
                 let a1 = 2.0 * dpDotDv
                 let a0 = dpDotDp - Double(r * r)
-                
+
                 let roots = QuarticSolver.solveQuartic(a: a4, b: a3, c: a2, d: a1, e: a0)
                 if let time = smallestPositiveRoot(roots, maxTime: maxTimeRemaining) {
                     candidates.append(PhysicsEvent(
@@ -764,6 +777,7 @@ class EventDrivenEngine {
     private func resolveEvent(_ event: PhysicsEvent) {
         // Record event for game rules / audio
         resolvedEvents.append(event.type)
+        resolvedEventTimes.append(currentTime)
 
         if case .ballBall = event.type, firstBallBallCollisionTime == nil {
             firstBallBallCollisionTime = event.time
@@ -891,17 +905,19 @@ class EventDrivenEngine {
     private func resolvePocket(ball: String, pocketId: String) {
         guard var state = balls[ball] else { return }
         
-        // 防止数值误判导致“球在台面中部突然消失”：
-        // 只有当球中心确实接近对应袋口时，才允许进入 pocketed 状态。
+        // 防止数值误判导致"球在台面中部突然消失"：
+        // 使用 XZ 2D 距离：袋口中心在台面高度处，球心在台面上方 radius，
+        // 若用 3D 距离会永远带一个 Y 偏移量，导致误拒绝合法进袋。
         if let pocket = tableGeometry.pockets.first(where: { $0.id == pocketId }) {
-            let dist = (state.position - pocket.center).length()
+            let dx = state.position.x - pocket.center.x
+            let dz = state.position.z - pocket.center.z
+            let dist = sqrtf(dx * dx + dz * dz)
             let allowed = pocket.radius + BallPhysics.radius * 1.5
             if dist > allowed {
-                print("[EventDrivenEngine] 忽略可疑进袋: ball=\(ball), pocket=\(pocketId), dist=\(dist), allowed=\(allowed), pos=\(state.position)")
+                print("[EventDrivenEngine] 忽略可疑进袋: ball=\(ball), pocket=\(pocketId), dist2D=\(dist), allowed=\(allowed), pos=\(state.position)")
                 return
             }
         }
-        
         state.state = .pocketed
         state.velocity = SCNVector3Zero
         state.angularVelocity = SCNVector3Zero

@@ -1252,17 +1252,17 @@ class BilliardSceneViewModel: ObservableObject {
     
     /// 从 EventDrivenEngine 提取游戏事件
     private func extractGameEvents(from engine: EventDrivenEngine) {
-        for eventType in engine.resolvedEvents {
+        for (eventType, eventTime) in zip(engine.resolvedEvents, engine.resolvedEventTimes) {
             switch eventType {
             case .ballBall(let a, let b):
-                shotEvents.append(.ballBallCollision(ball1: a, ball2: b, time: engine.currentTime))
+                shotEvents.append(.ballBallCollision(ball1: a, ball2: b, time: eventTime))
             case .ballCushion(let ball, _, _):
-                shotEvents.append(.ballCushionCollision(ball: ball, time: engine.currentTime))
+                shotEvents.append(.ballCushionCollision(ball: ball, time: eventTime))
             case .pocket(let ball, let pocketId):
                 if ball == "cueBall" {
-                    shotEvents.append(.cueBallPocketed(time: engine.currentTime))
+                    shotEvents.append(.cueBallPocketed(time: eventTime))
                 } else {
-                    shotEvents.append(.ballPocketed(ball: ball, pocket: pocketId, time: engine.currentTime))
+                    shotEvents.append(.ballPocketed(ball: ball, pocket: pocketId, time: eventTime))
                 }
             case .transition:
                 break
@@ -1350,6 +1350,23 @@ class BilliardSceneViewModel: ObservableObject {
                 guard let name = ballNode.name else { continue }
                 if !playback.pocketedBalls.contains(name) {
                     ballNode.position.y = surfaceY
+                }
+            }
+
+            // 兜底：强制清理所有尚未淡出完毕的进袋球节点
+            // 当球进袋时刻距回放结束不足 fadeOutDuration(0.25s) 时，淡出可能尚未完成
+            for name in playback.pocketedBalls {
+                scene.hideShadow(for: name)
+                if name == "cueBall" {
+                    if let node = scene.cueBallNode {
+                        node.removeFromParentNode()
+                        scene.clearCueBallReference()
+                    }
+                } else {
+                    if let node = scene.targetBallNodes.first(where: { $0.name == name }) {
+                        node.removeFromParentNode()
+                        scene.removeTargetBall(named: name)
+                    }
                 }
             }
 

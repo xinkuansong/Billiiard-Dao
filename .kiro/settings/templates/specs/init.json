@@ -1,0 +1,31 @@
+{
+  "feature_name": "{{FEATURE_NAME}}",
+  "created_at": "{{TIMESTAMP}}",
+  "updated_at": "{{TIMESTAMP}}",
+  "language": "zh",
+  "type": "physics-validation",
+  "phase": "initialized",
+  "approvals": {
+    "requirements": {
+      "generated": false,
+      "approved": false
+    },
+    "design": {
+      "generated": false,
+      "approved": false
+    },
+    "tasks": {
+      "generated": false,
+      "approved": false
+    }
+  },
+  "validation": {
+    "current_round": 0,
+    "converged": false,
+    "channels": {
+      "automated": { "total": 0, "pass": 0, "fail": 0 },
+      "manual": { "total": 0, "pass": 0, "fail": 0, "deviation": 0 }
+    }
+  },
+  "ready_for_implementation": false
+}

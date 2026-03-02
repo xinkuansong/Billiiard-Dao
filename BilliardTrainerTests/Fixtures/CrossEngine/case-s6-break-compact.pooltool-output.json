@@ -1,33 +1,261 @@
 {
   "metadata": {
     "id": "s6-break-compact",
-    "engine": "pooltool-fallback"
+    "engine": "pooltool"
   },
-  "events": [],
+  "events": [
+    {
+      "type": "BALL_BALL",
+      "time": 0.14055777898440006,
+      "ids": [
+        "cueBall",
+        "ball_1"
+      ]
+    },
+    {
+      "type": "BALL_BALL",
+      "time": 0.15794819308711336,
+      "ids": [
+        "ball_1",
+        "ball_5"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.1861086931414407,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.19154120052525722,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 0.41678115355468304,
+      "ids": [
+        "ball_5",
+        "18"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 0.5395653597975724,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "BALL_BALL",
+      "time": 0.5532133158521926,
+      "ids": [
+        "cueBall",
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.5700945293819414,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.5811009103909291,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.8380099706259193,
+      "ids": [
+        "ball_5"
+      ]
+    },
+    {
+      "type": "BALL_BALL",
+      "time": 0.8572618056612336,
+      "ids": [
+        "ball_1",
+        "ball_5"
+      ]
+    },
+    {
+      "type": "BALL_BALL",
+      "time": 0.871764508663054,
+      "ids": [
+        "cueBall",
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.8869175461443898,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 0.9153288641831395,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "BALL_BALL",
+      "time": 1.0192757817525324,
+      "ids": [
+        "ball_1",
+        "ball_5"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 1.0603567438785888,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 1.0665601271693455,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 1.0865355185311452,
+      "ids": [
+        "ball_5"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 1.8893014825371452,
+      "ids": [
+        "cueBall",
+        "9"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 2.0206411755004985,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 2.504013734524574,
+      "ids": [
+        "ball_5"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 2.9399289552588748,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "BALL_BALL",
+      "time": 4.114154753455167,
+      "ids": [
+        "cueBall",
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 4.140851878532062,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 4.156460207438267,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "BALL_BALL",
+      "time": 4.721306937258098,
+      "ids": [
+        "ball_1",
+        "ball_5"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 4.7316485848072825,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 4.736719787477293,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 4.738937606573295,
+      "ids": [
+        "ball_5"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 4.963584919939893,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 5.365355310519533,
+      "ids": [
+        "ball_5"
+      ]
+    }
+  ],
   "finalState": {
     "cueBall": {
       "position": [
-        0.0,
+        -6.413935307258978e-06,
         0.828575,
-        0.6
+        0.14424787872162848
       ],
       "velocity": [
         0.0,
         0.0,
-        -4.0
+        0.0
       ],
       "angularVelocity": [
         0.0,
         0.0,
         0.0
       ],
-      "motionState": "sliding"
+      "motionState": "stationary"
     },
     "ball_1": {
       "position": [
-        0.0,
+        4.777813870926462e-06,
         0.828575,
-        0.0
+        0.023048544201034082
       ],
       "velocity": [
         0.0,
@@ -45,7 +273,7 @@
       "position": [
         0.06,
         0.828575,
-        -0.06
+        -0.05999999999999994
       ],
       "velocity": [
         0.0,
@@ -63,7 +291,7 @@
       "position": [
         -0.06,
         0.828575,
-        -0.06
+        -0.05999999999999994
       ],
       "velocity": [
         0.0,
@@ -79,7 +307,7 @@
     },
     "ball_4": {
       "position": [
-        0.12,
+        0.11999999999999994,
         0.828575,
         -0.12
       ],
@@ -97,9 +325,9 @@
     },
     "ball_5": {
       "position": [
-        0.0,
+        -1.0645688783839091e-06,
         0.828575,
-        -0.12
+        -0.051968996784853894
       ],
       "velocity": [
         0.0,

@@ -1,33 +1,107 @@
 {
   "metadata": {
     "id": "s3-draw-shot",
-    "engine": "pooltool-fallback"
+    "engine": "pooltool"
   },
-  "events": [],
+  "events": [
+    {
+      "type": "BALL_BALL",
+      "time": 0.11890672387030654,
+      "ids": [
+        "cueBall",
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.18964175355020624,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.5162538778011334,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 0.5397437585453468,
+      "ids": [
+        "ball_1",
+        "18"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.8258762240910842,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "ROLLING_SPINNING",
+      "time": 2.3305327820024235,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 2.5863586939401255,
+      "ids": [
+        "ball_1",
+        "9"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 2.705594785356392,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 6.85861615433342,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SPINNING_STATIONARY",
+      "time": 6.9601685278438366,
+      "ids": [
+        "cueBall"
+      ]
+    }
+  ],
   "finalState": {
     "cueBall": {
       "position": [
-        0.0,
+        0.03899517960996196,
         0.828575,
-        0.4
+        -0.17452091831984573
       ],
       "velocity": [
         0.0,
         0.0,
-        -3.0
+        0.0
       ],
       "angularVelocity": [
         0.0,
-        -80.0,
+        0.0,
         0.0
       ],
-      "motionState": "sliding"
+      "motionState": "stationary"
     },
     "ball_1": {
       "position": [
-        0.0,
+        -0.08644822888476456,
         0.828575,
-        0.0
+        0.05391764786901854
       ],
       "velocity": [
         0.0,

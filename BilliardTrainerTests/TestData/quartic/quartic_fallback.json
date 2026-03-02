@@ -1,0 +1,51 @@
+{
+  "module": "quartic",
+  "source": "handcrafted_fallback",
+  "tolerance": {
+    "abs": 1e-05,
+    "rel": 0.001
+  },
+  "test_cases": [
+    {
+      "id": "hand_001",
+      "input": {
+        "a": 1,
+        "b": 0,
+        "c": -2,
+        "d": 0,
+        "e": 1
+      },
+      "expected_real_roots": [
+        -1.0,
+        1.0
+      ]
+    },
+    {
+      "id": "hand_002",
+      "input": {
+        "a": 1,
+        "b": -10,
+        "c": 35,
+        "d": -50,
+        "e": 24
+      },
+      "expected_real_roots": [
+        1.0,
+        2.0,
+        3.0,
+        4.0
+      ]
+    },
+    {
+      "id": "hand_003",
+      "input": {
+        "a": 1,
+        "b": 0,
+        "c": 0,
+        "d": 0,
+        "e": 1
+      },
+      "expected_real_roots": []
+    }
+  ]
+}

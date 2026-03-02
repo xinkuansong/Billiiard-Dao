@@ -1,0 +1,80 @@
+{
+  "metadata": {
+    "id": "s9-multi-cushion",
+    "engine": "pooltool"
+  },
+  "events": [
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 0.08592311346499981,
+      "ids": [
+        "cueBall",
+        "12"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.3778181466991229,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 1.0050596891523012,
+      "ids": [
+        "cueBall",
+        "3"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 1.1731939413292722,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 1.749221966521172,
+      "ids": [
+        "cueBall",
+        "18"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 1.8316382052519602,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 5.7814597840010915,
+      "ids": [
+        "cueBall"
+      ]
+    }
+  ],
+  "finalState": {
+    "cueBall": {
+      "position": [
+        0.40848050050788226,
+        0.828575,
+        -0.36884640043049466
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "stationary"
+    }
+  }
+}

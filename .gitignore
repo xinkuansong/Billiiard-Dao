@@ -2,3 +2,5 @@
 .specstory/
 .DS_Store
 *.xcuserstate
+.venv/
+*.xcresult

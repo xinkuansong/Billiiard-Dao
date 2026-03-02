@@ -20,6 +20,8 @@ class FreePlayViewModel: ObservableObject {
     @Published var isPaused: Bool = false
     @Published var showGameOverOverlay: Bool = false
     @Published var foulFlash: Bool = false
+    /// 本杆母球是否已落袋（由 onCueBallPocketed 即时设置，onShotFinished 重置）
+    @Published var didScratch: Bool = false
     
     // MARK: - Properties
     
@@ -65,6 +67,10 @@ class FreePlayViewModel: ObservableObject {
         
         sceneViewModel.onTargetBallPocketed = { [weak self] _, _ in
             self?.pocketedCount += 1
+        }
+
+        sceneViewModel.onCueBallPocketed = { [weak self] in
+            self?.didScratch = true
         }
         
         sceneViewModel.onShotCompleted = { [weak self] _, _ in
@@ -130,6 +136,7 @@ class FreePlayViewModel: ObservableObject {
         isPaused = false
         showGameOverOverlay = false
         foulFlash = false
+        didScratch = false
         
         gameManager.reset()
         
@@ -163,9 +170,15 @@ class FreePlayViewModel: ObservableObject {
     
     private func onShotFinished() {
         shotCount += 1
+        didScratch = false
         
         let events = sceneViewModel.shotEvents
         gameManager.processShot(events: events)
+
+        // FreePlay 使用 GameManager 的权威判定结果，覆盖 onBallsAtRest 中 EightBallRules 的初步结果
+        sceneViewModel.lastShotLegal = gameManager.lastFouls.isEmpty
+        sceneViewModel.lastFouls = gameManager.lastFouls
+
         // Force UI update
         objectWillChange.send()
         

@@ -2,6 +2,43 @@ import XCTest
 import SceneKit
 @testable import BilliardTrainer
 
+// MARK: - JSON Suite Models: Cue Strike
+
+private struct CueStrikeTestSuite: Decodable {
+    struct Tolerance: Decodable {
+        let abs: Double
+        let rel: Double
+    }
+    struct TestCase: Decodable {
+        struct Input: Decodable {
+            // swiftlint:disable identifier_name
+            let V0: Double
+            let phi: Double
+            let theta: Double
+            let Q: [Double]
+            let R: Double
+            let m: Double
+            let cue_m: Double
+            // swiftlint:enable identifier_name
+        }
+        struct Expected: Decodable {
+            let squirt: Double
+            let rvw_after: [[Double]]
+        }
+        let id: String
+        let input: Input
+        let expected: Expected
+    }
+    let module: String
+    let source: String
+    let tolerance: Tolerance
+    let testCases: [TestCase]
+    enum CodingKeys: String, CodingKey {
+        case module, source, tolerance
+        case testCases = "test_cases"
+    }
+}
+
 final class CueBallStrikeTests: XCTestCase {
 
     // MARK: - Center Strike (No Spin)
@@ -128,5 +165,105 @@ final class CueBallStrikeTests: XCTestCase {
     func testZeroVelocityStrike() {
         let result = CueBallStrike.strike(V0: 0, phi: 0, a: 0, b: 0)
         XCTAssertEqual(result.velocity.length(), 0, accuracy: 0.001)
+    }
+
+    // MARK: - JSON-Driven Pooltool Cross-Validation: Cue Strike
+
+    func testPooltoolCueStrikeBaseline() throws {
+        try runCueStrikeJSONSuite(filename: "cue_strike.json")
+    }
+
+    // MARK: - Cue Strike JSON Suite Helpers
+
+    private var csTestDataDir: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // Physics/
+            .deletingLastPathComponent() // BilliardTrainerTests/
+            .appendingPathComponent("TestData/cue_strike")
+    }
+
+    /// Convert pooltool cue-strike velocity [vx, vy, 0] (Z-up XY-table) to Swift SCNVector3 (Y-up XZ-table).
+    ///
+    /// Axis mapping: pooltool X → Swift X, pooltool Y → Swift Z, pooltool Z → Swift Y.
+    /// Velocity: (vx, vy, 0) → Swift (vx, 0, vy).
+    private func csVelocityToSwift(_ v: [Double]) -> SCNVector3 {
+        SCNVector3(Float(v[0]), 0.0, Float(v[1]))
+    }
+
+    /// Convert pooltool cue-strike angular velocity [wx, wy, wz] (Z-up) to Swift SCNVector3 (Y-up).
+    ///
+    /// Axis mapping: pooltool X → Swift X, pooltool Y → Swift Z, pooltool Z → Swift Y.
+    /// Angular velocity: (wx, wy, wz) → Swift (wx, wz, wy).
+    private func csAngularVelToSwift(_ w: [Double]) -> SCNVector3 {
+        SCNVector3(Float(w[0]), Float(w[2]), Float(w[1]))
+    }
+
+    private func runCueStrikeJSONSuite(filename: String) throws {
+        let url = csTestDataDir.appendingPathComponent(filename)
+        let data = try Data(contentsOf: url)
+        let suite = try JSONDecoder().decode(CueStrikeTestSuite.self, from: data)
+
+        let absTol = Float(suite.tolerance.abs)
+        let relTol = Float(suite.tolerance.rel)
+        var failures: [String] = []
+
+        for tc in suite.testCases {
+            let inp = tc.input
+
+            // Q = [a, c, b] in pooltool export convention; extract Swift a and b.
+            let a = Float(inp.Q[0])
+            let b = Float(inp.Q[2])
+
+            // phi: pooltool phi=0 → ball moves in +X (XY-table).
+            // Swift phi=π/2 → ball moves in +X (XZ-table).
+            // General mapping: phi_sw = phi_pt_rad + π/2.
+            let phiSw = Float(inp.phi * .pi / 180.0) + .pi / 2.0
+            let thetaSw = Float(inp.theta * .pi / 180.0)
+
+            let result = CueBallStrike.strike(V0: Float(inp.V0), phi: phiSw, theta: thetaSw, a: a, b: b)
+
+            let expVel = csVelocityToSwift(tc.expected.rvw_after[1])
+            let expOmega = csAngularVelToSwift(tc.expected.rvw_after[2])
+
+            let velChecks: [(got: Float, exp: Float, label: String)] = [
+                (result.velocity.x, expVel.x, "vel.x"),
+                (result.velocity.y, expVel.y, "vel.y"),
+                (result.velocity.z, expVel.z, "vel.z"),
+            ]
+            let omegaChecks: [(got: Float, exp: Float, label: String)] = [
+                (result.angularVelocity.x, expOmega.x, "omega.x"),
+                (result.angularVelocity.y, expOmega.y, "omega.y"),
+                (result.angularVelocity.z, expOmega.z, "omega.z"),
+            ]
+
+            for check in velChecks + omegaChecks {
+                let diff = abs(check.got - check.exp)
+                let tol = max(absTol, relTol * abs(check.exp))
+                if diff > tol {
+                    failures.append(
+                        "\(tc.id) \(check.label): " +
+                        "got=\(check.got) exp=\(check.exp) diff=\(diff) tol=\(tol)"
+                    )
+                }
+            }
+
+            // Squirt angle comparison.
+            let squirtGot = CueBallStrike.squirtAngle(a: a)
+            let squirtExp = Float(tc.expected.squirt)
+            let squirtDiff = abs(squirtGot - squirtExp)
+            let squirtTol = max(absTol, relTol * abs(squirtExp))
+            if squirtDiff > squirtTol {
+                failures.append(
+                    "\(tc.id) squirt: " +
+                    "got=\(squirtGot) exp=\(squirtExp) diff=\(squirtDiff) tol=\(squirtTol)"
+                )
+            }
+        }
+
+        XCTAssertTrue(
+            failures.isEmpty,
+            "[\(suite.source)] \(failures.count) component(s) failed across \(suite.testCases.count) cases:\n"
+                + failures.prefix(20).joined(separator: "\n")
+        )
     }
 }

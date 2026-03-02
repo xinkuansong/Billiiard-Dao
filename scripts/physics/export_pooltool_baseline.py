@@ -115,6 +115,19 @@ def make_pooltool_output(case_data: dict[str, Any], pt: Any) -> dict[str, Any]:
         ball.state.s = STATE_TO_INT.get(b["state"], 2)
         balls[b["id"]] = ball
 
+    # pooltool 0.5.0 crashes in get_next_ball_ball_collision when only one ball
+    # is present (empty cache → ValueError: min() iterable argument is empty).
+    # Add a temporary dummy ball off-table so the pair cache is non-empty.
+    dummy_id: str | None = None
+    if len(balls) == 1:
+        dummy_id = "__dummy__"
+        dummy = pt.Ball.create(dummy_id)
+        dummy.state.rvw[0] = [-10.0, -10.0, dummy.params.R]
+        dummy.state.rvw[1] = [0.0, 0.0, 0.0]
+        dummy.state.rvw[2] = [0.0, 0.0, 0.0]
+        dummy.state.s = 0  # stationary
+        balls[dummy_id] = dummy
+
     system = pt.System(cue=cue, table=table, balls=balls)
     simulated = pt.simulate(
         system,
@@ -128,6 +141,8 @@ def make_pooltool_output(case_data: dict[str, Any], pt: Any) -> dict[str, Any]:
     for event in simulated.events:
         if event.event_type.name == "NONE":
             continue
+        if dummy_id and dummy_id in list(event.ids):
+            continue
         events.append(
             {
                 "type": event.event_type.name,
@@ -140,6 +155,8 @@ def make_pooltool_output(case_data: dict[str, Any], pt: Any) -> dict[str, Any]:
     surface_y = float(case_data["balls"][0]["position"][1]) if case_data["balls"] else 0.0
     final_state: dict[str, Any] = {}
     for ball_id, ball in simulated.balls.items():
+        if ball_id == dummy_id:
+            continue
         final_state[ball_id] = {
             "position": from_pool_position(ball.state.rvw[0], table.w, table.l, surface_y),
             "velocity": from_pool_velocity(ball.state.rvw[1]),

@@ -1,0 +1,105 @@
+{
+  "metadata": {
+    "id": "s7-thin-cut",
+    "engine": "pooltool"
+  },
+  "events": [
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.378061889784394,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 0.6896903091921478,
+      "ids": [
+        "cueBall",
+        "18"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.9535298598344037,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 0.9558036753503667,
+      "ids": [
+        "cueBall",
+        "15"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 1.016895327172655,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 3.32834400420896,
+      "ids": [
+        "cueBall",
+        "9"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 3.4125377839178137,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 6.43864850760336,
+      "ids": [
+        "cueBall"
+      ]
+    }
+  ],
+  "finalState": {
+    "cueBall": {
+      "position": [
+        0.04000775107395388,
+        0.828575,
+        0.4949720853628291
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "stationary"
+    },
+    "ball_1": {
+      "position": [
+        0.2,
+        0.828575,
+        -0.09999999999999998
+      ],
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "angularVelocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "motionState": "stationary"
+    }
+  }
+}

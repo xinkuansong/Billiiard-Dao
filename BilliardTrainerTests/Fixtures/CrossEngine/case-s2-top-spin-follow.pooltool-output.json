@@ -1,33 +1,107 @@
 {
   "metadata": {
     "id": "s2-top-spin-follow",
-    "engine": "pooltool-fallback"
+    "engine": "pooltool"
   },
-  "events": [],
+  "events": [
+    {
+      "type": "BALL_BALL",
+      "time": 0.11890672387030654,
+      "ids": [
+        "cueBall",
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.1896417535502063,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.5162538778011334,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 0.5397437585453468,
+      "ids": [
+        "ball_1",
+        "18"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.8258762992439583,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "ROLLING_SPINNING",
+      "time": 2.3305327820024284,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 2.5863581291261006,
+      "ids": [
+        "ball_1",
+        "9"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 2.7055941982943685,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 6.858615797918334,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SPINNING_STATIONARY",
+      "time": 6.960168527843836,
+      "ids": [
+        "cueBall"
+      ]
+    }
+  ],
   "finalState": {
     "cueBall": {
       "position": [
-        0.0,
+        -0.03899517960996557,
         0.828575,
-        0.4
+        -0.17452091831984629
       ],
       "velocity": [
         0.0,
         0.0,
-        -3.0
+        0.0
       ],
       "angularVelocity": [
         0.0,
-        80.0,
+        0.0,
         0.0
       ],
-      "motionState": "sliding"
+      "motionState": "stationary"
     },
     "ball_1": {
       "position": [
-        0.0,
+        0.08644295630550286,
         0.828575,
-        0.0
+        0.053917227647874655
       ],
       "velocity": [
         0.0,

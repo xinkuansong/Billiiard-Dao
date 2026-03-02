@@ -1,7 +1,7 @@
 # Physics 模块 - 设计与约束
 
 > 对应 README：[README.md](./README.md)
-> 文档最后更新：2026-02-27
+> 文档最后更新：2026-03-03
 
 ## 设计目标与非目标
 
@@ -73,6 +73,7 @@
   - `sliding` → `rolling` → `spinning` → `stationary`
   - `pocketed` 为终止状态，不可转换回其他状态
 - **事件时间单调性**：事件队列中事件时间必须单调递增，处理完的事件不可再次入队
+- **resolvedEvents / resolvedEventTimes 并行数组**：`resolvedEvents: [PhysicsEventType]` 与 `resolvedEventTimes: [Float]` 下标严格对应，`resolvedEventTimes[i]` 为第 `i` 个事件发生时的绝对模拟时间（`currentTime`，已在 `resolveEvent` 中 `currentTime += dt` 之后记录）。消费方（`extractGameEvents`）必须通过 `zip(resolvedEvents, resolvedEventTimes)` 联动读取，不可单独使用 `engine.currentTime`（后者为最终模拟结束时刻，非事件发生时刻）。
 
 ### 常量与阈值清单
 

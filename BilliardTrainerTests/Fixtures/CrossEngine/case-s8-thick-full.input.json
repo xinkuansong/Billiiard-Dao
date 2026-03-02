@@ -1,0 +1,1 @@
+{"metadata":{"id":"s8-thick-full","description":"Thick/full hit (厚球)"},"simulation":{"maxEvents":1200,"maxTime":10},"balls":[{"id":"cueBall","position":[0,0.828575,0.4],"velocity":[0,0,-3],"angularVelocity":[0,0,0],"state":"sliding"},{"id":"ball_1","position":[0,0.828575,0],"velocity":[0,0,0],"angularVelocity":[0,0,0],"state":"stationary"}]}

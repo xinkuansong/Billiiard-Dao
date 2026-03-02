@@ -1,0 +1,1 @@
+{"metadata":{"id":"s7-thin-cut","description":"Thin cut shot (薄球)"},"simulation":{"maxEvents":1200,"maxTime":10},"balls":[{"id":"cueBall","position":[0,0.828575,0.4],"velocity":[0.7,0,-2.5],"angularVelocity":[0,0,0],"state":"sliding"},{"id":"ball_1","position":[0.2,0.828575,-0.1],"velocity":[0,0,0],"angularVelocity":[0,0,0],"state":"stationary"}]}

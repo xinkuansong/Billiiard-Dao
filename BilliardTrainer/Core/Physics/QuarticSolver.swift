@@ -205,7 +205,26 @@ struct QuarticSolver {
         }
         guard x.isFinite && !x.isNaN else { return nil }
         let residual = abs(((((a * x + b) * x + c) * x + d) * x + e))
-        let scale = max(1.0, abs(a) + abs(b) + abs(c) + abs(d) + abs(e))
+        // Use max of individual term magnitudes at x as scale.
+        // This correctly handles polynomials with large roots where catastrophic
+        // cancellation makes the coefficient-sum scale far too small.
+        // Ref: standard relative residual for polynomial evaluation at large x.
+        let termA = abs(a * x * x * x * x)
+        let termB = abs(b * x * x * x)
+        let termC = abs(c * x * x)
+        let termD = abs(d * x)
+        let termE = abs(e)
+        let scale: Double
+        let maxTerm = max(termA.isFinite ? termA : 0,
+                         termB.isFinite ? termB : 0,
+                         termC.isFinite ? termC : 0,
+                         termD.isFinite ? termD : 0,
+                         termE)
+        if maxTerm > 0 {
+            scale = max(1.0, maxTerm)
+        } else {
+            scale = max(1.0, abs(a) + abs(b) + abs(c) + abs(d) + abs(e))
+        }
         if residual / scale > 1e-6 { return nil }
         return x
     }

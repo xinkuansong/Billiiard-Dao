@@ -1,33 +1,115 @@
 {
   "metadata": {
     "id": "s1-center-straight",
-    "engine": "pooltool-fallback"
+    "engine": "pooltool"
   },
-  "events": [],
+  "events": [
+    {
+      "type": "BALL_BALL",
+      "time": 0.11890672387030654,
+      "ids": [
+        "cueBall",
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.16343428396658918,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 0.54003239524819,
+      "ids": [
+        "ball_1",
+        "18"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 0.819243134104033,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "BALL_BALL",
+      "time": 1.3586082188305575,
+      "ids": [
+        "cueBall",
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 1.4746023657291767,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 1.5085577150891634,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "BALL_LINEAR_CUSHION",
+      "time": 3.3925964475273878,
+      "ids": [
+        "cueBall",
+        "9"
+      ]
+    },
+    {
+      "type": "SLIDING_ROLLING",
+      "time": 3.4509373476908753,
+      "ids": [
+        "cueBall"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 3.6327027767554125,
+      "ids": [
+        "ball_1"
+      ]
+    },
+    {
+      "type": "ROLLING_STATIONARY",
+      "time": 5.473208197799993,
+      "ids": [
+        "cueBall"
+      ]
+    }
+  ],
   "finalState": {
     "cueBall": {
       "position": [
-        0.0,
+        -1.6278622186893799e-06,
         0.828575,
-        0.4
+        0.7465181929903656
       ],
       "velocity": [
         0.0,
         0.0,
-        -3.0
+        0.0
       ],
       "angularVelocity": [
         0.0,
         0.0,
         0.0
       ],
-      "motionState": "sliding"
+      "motionState": "stationary"
     },
     "ball_1": {
       "position": [
-        0.0,
+        -2.453592884421596e-14,
         0.828575,
-        0.0
+        0.11776216982495524
       ],
       "velocity": [
         0.0,

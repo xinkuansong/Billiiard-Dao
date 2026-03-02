@@ -60,15 +60,19 @@ final class PhysicsRegressionTests: XCTestCase {
     func testS2_TopSpinFollow() {
         let topSpinEngine = makeEngine()
         let centerEngine = makeEngine()
-        let targetPos = SCNVector3(0, tableY, 0)
-        let cueBallPos = SCNVector3(0, tableY, 0.4)
+        // 设计约束：
+        // 1. X=0.45 避开 X=0 的中袋直线
+        // 2. 速度 1.5m/s：使 ball_1 碰撞后最远行驶 ~0.28m，不触底库 (距底库 0.635m)
+        //    同时使 topSpin 母球跟进最远 ~0.17m，亦不触库、不入袋
+        let targetPos = SCNVector3(0.45, tableY, 0)
+        let cueBallPos = SCNVector3(0.45, tableY, 0.4)
 
         let aimDir = (targetPos - cueBallPos).normalized()
         let topSpinStrike = CueBallStrike.executeStrike(
-            aimDirection: aimDir, velocity: 3.0, spinX: 0, spinY: 0.8
+            aimDirection: aimDir, velocity: 1.5, spinX: 0, spinY: 0.8
         )
         let centerStrike = CueBallStrike.executeStrike(
-            aimDirection: aimDir, velocity: 3.0, spinX: 0, spinY: 0
+            aimDirection: aimDir, velocity: 1.5, spinX: 0, spinY: 0
         )
 
         topSpinEngine.setBall(BallState(
@@ -95,7 +99,10 @@ final class PhysicsRegressionTests: XCTestCase {
         let topSpinCue = topSpinEngine.getBall("cueBall")!
         let centerCue = centerEngine.getBall("cueBall")!
 
-        // Compare against center strike baseline in the same geometry.
+        // 顶旋球（top spin follow）应比中心击球产生更大的前进量（Z 更小/更向前）
+        // 两球均不应进袋（速度低，不触库）
+        XCTAssertFalse(topSpinCue.isPocketed, "S2: Top spin cue ball should not be pocketed in this setup")
+        XCTAssertFalse(centerCue.isPocketed, "S2: Center strike cue ball should not be pocketed in this setup")
         XCTAssertLessThan(
             topSpinCue.position.z,
             centerCue.position.z - 0.01,

@@ -2,6 +2,41 @@ import XCTest
 import SceneKit
 @testable import BilliardTrainer
 
+// MARK: - JSON Suite Models: Ball-Ball Resolve
+
+private struct BallBallResolveTestSuite: Decodable {
+    struct Tolerance: Decodable {
+        let abs: Double
+        let rel: Double
+    }
+    struct TestCase: Decodable {
+        // rvw: [[px,py,pz],[vx,vy,vz],[wx,wy,wz]] in pooltool Z-up / XY-table coords
+        let id: String
+        let input: Input
+        let expected: Expected
+
+        struct Input: Decodable {
+            let rvw1: [[Double]]
+            let rvw2: [[Double]]
+            // swiftlint:disable identifier_name
+            let R: Double
+            // swiftlint:enable identifier_name
+        }
+        struct Expected: Decodable {
+            let rvw1: [[Double]]
+            let rvw2: [[Double]]
+        }
+    }
+    let module: String
+    let source: String
+    let tolerance: Tolerance
+    let testCases: [TestCase]
+    enum CodingKeys: String, CodingKey {
+        case module, source, tolerance
+        case testCases = "test_cases"
+    }
+}
+
 final class CollisionResolverTests: XCTestCase {
 
     let tableY = TablePhysics.height + BallPhysics.radius
@@ -179,5 +214,108 @@ final class CollisionResolverTests: XCTestCase {
             XCTAssertLessThan(result.velocity.length(), vel.length(),
                               "Should lose energy for normal \(normal)")
         }
+    }
+
+    // MARK: - JSON-Driven Pooltool Cross-Validation: Ball-Ball Resolve
+
+    func testPooltoolBallBallResolveBaseline() throws {
+        try runBBResolveJSONSuite(filename: "ball_ball_resolve.json")
+    }
+
+    // MARK: - BBResolve JSON Suite Helpers
+
+    private var bbrTestDataDir: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // Physics/
+            .deletingLastPathComponent() // BilliardTrainerTests/
+            .appendingPathComponent("TestData/ball_ball_resolve")
+    }
+
+    /// Convert pooltool rvw angular velocity [wx, wy, wz] (Z-up) to Swift SCNVector3 (Y-up).
+    ///
+    /// Coordinate axis mapping: pooltool X→Swift X, pooltool Y→Swift Z, pooltool Z→Swift Y.
+    /// Therefore omega (wx, wy, wz) → SCNVector3(wx, wz, wy).
+    private func bbrAngularVelToSwift(_ w: [Double]) -> SCNVector3 {
+        SCNVector3(Float(w[0]), Float(w[2]), Float(w[1]))
+    }
+
+    /// Convert pooltool rvw velocity [vx, vy, 0] (XY-table) to Swift SCNVector3 (XZ-table).
+    ///
+    /// Ref: same convention as bbctAccelInSwiftCoords in CollisionDetectorTests.
+    /// pooltool (vx, vy, 0) → Swift (vx, 0, vy).
+    private func bbrVelocityToSwift(_ v: [Double]) -> SCNVector3 {
+        SCNVector3(Float(v[0]), 0.0, Float(v[1]))
+    }
+
+    /// Convert pooltool rvw position [px, py, pz_height] to Swift SCNVector3.
+    ///
+    /// pooltool (px, py, pz_height) → Swift (px, pz_height, py).
+    private func bbrPositionToSwift(_ r: [Double]) -> SCNVector3 {
+        SCNVector3(Float(r[0]), Float(r[2]), Float(r[1]))
+    }
+
+    private func runBBResolveJSONSuite(filename: String) throws {
+        let url = bbrTestDataDir.appendingPathComponent(filename)
+        let data = try Data(contentsOf: url)
+        let suite = try JSONDecoder().decode(BallBallResolveTestSuite.self, from: data)
+
+        let absTol = Float(suite.tolerance.abs)
+        let relTol = Float(suite.tolerance.rel)
+        var failures: [String] = []
+
+        for tc in suite.testCases {
+            let inp = tc.input
+
+            let posA = bbrPositionToSwift(inp.rvw1[0])
+            let posB = bbrPositionToSwift(inp.rvw2[0])
+            let velA = bbrVelocityToSwift(inp.rvw1[1])
+            let velB = bbrVelocityToSwift(inp.rvw2[1])
+            let angVelA = bbrAngularVelToSwift(inp.rvw1[2])
+            let angVelB = bbrAngularVelToSwift(inp.rvw2[2])
+
+            let result = CollisionResolver.resolveBallBallPure(
+                posA: posA, posB: posB,
+                velA: velA, velB: velB,
+                angVelA: angVelA, angVelB: angVelB
+            )
+
+            let expVelA = bbrVelocityToSwift(tc.expected.rvw1[1])
+            let expVelB = bbrVelocityToSwift(tc.expected.rvw2[1])
+            let expAngVelA = bbrAngularVelToSwift(tc.expected.rvw1[2])
+            let expAngVelB = bbrAngularVelToSwift(tc.expected.rvw2[2])
+
+            let checks: [(got: SCNVector3, exp: SCNVector3, label: String)] = [
+                (result.velA,    expVelA,    "velA"),
+                (result.velB,    expVelB,    "velB"),
+                (result.angVelA, expAngVelA, "angVelA"),
+                (result.angVelB, expAngVelB, "angVelB"),
+            ]
+
+            for check in checks {
+                let diff = max(
+                    abs(check.got.x - check.exp.x),
+                    max(abs(check.got.y - check.exp.y), abs(check.got.z - check.exp.z))
+                )
+                let magnitude = max(
+                    abs(check.exp.x),
+                    max(abs(check.exp.y), abs(check.exp.z))
+                )
+                let tol = max(absTol, relTol * magnitude)
+                if diff > tol {
+                    failures.append(
+                        "\(tc.id) \(check.label): " +
+                        "got=(\(check.got.x),\(check.got.y),\(check.got.z)) " +
+                        "exp=(\(check.exp.x),\(check.exp.y),\(check.exp.z)) " +
+                        "diff=\(diff) tol=\(tol)"
+                    )
+                }
+            }
+        }
+
+        XCTAssertTrue(
+            failures.isEmpty,
+            "[\(suite.source)] \(failures.count) component(s) failed across \(suite.testCases.count) cases:\n"
+                + failures.prefix(10).joined(separator: "\n")
+        )
     }
 }

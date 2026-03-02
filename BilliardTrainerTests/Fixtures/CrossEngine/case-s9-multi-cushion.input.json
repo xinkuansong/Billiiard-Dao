@@ -1,0 +1,1 @@
+{"metadata":{"id":"s9-multi-cushion","description":"Multi-cushion shot (多库)"},"simulation":{"maxEvents":1500,"maxTime":12},"balls":[{"id":"cueBall","position":[0.3,0.828575,0.5],"velocity":[2,0,-2],"angularVelocity":[0,0,0],"state":"sliding"}]}

@@ -74,7 +74,7 @@ final class CrossEngineComparisonTests: XCTestCase {
             includingPropertiesForKeys: nil
         ).filter { $0.lastPathComponent.hasSuffix(".input.json") }.sorted { $0.lastPathComponent < $1.lastPathComponent }
 
-        XCTAssertEqual(inputURLs.count, 5, "Core fixtures should contain exactly 5 golden input cases")
+        XCTAssertGreaterThanOrEqual(inputURLs.count, 8, "Fixtures should contain at least 8 input cases (s1–s3, s5–s9)")
 
         for inputURL in inputURLs {
             let inputData = try Data(contentsOf: inputURL)
@@ -123,16 +123,16 @@ final class CrossEngineComparisonTests: XCTestCase {
 
         engine.simulate(maxEvents: input.simulation.maxEvents, maxTime: input.simulation.maxTime)
 
-        let events = engine.resolvedEvents.map { event in
+        let events = zip(engine.resolvedEvents, engine.resolvedEventTimes).map { event, eventTime in
             switch event {
             case .ballBall(let a, let b):
-                return CrossEngineOutput.EventSummary(type: "BALL_BALL", time: nil, ids: [a, b])
+                return CrossEngineOutput.EventSummary(type: "BALL_BALL", time: eventTime, ids: [a, b])
             case .ballCushion(let ball, _, _):
-                return CrossEngineOutput.EventSummary(type: "BALL_CUSHION", time: nil, ids: [ball])
+                return CrossEngineOutput.EventSummary(type: "BALL_CUSHION", time: eventTime, ids: [ball])
             case .transition(let ball, let from, let to):
-                return CrossEngineOutput.EventSummary(type: "TRANSITION_\(from)_\(to)", time: nil, ids: [ball])
+                return CrossEngineOutput.EventSummary(type: "TRANSITION_\(from)_\(to)", time: eventTime, ids: [ball])
             case .pocket(let ball, let pocketId):
-                return CrossEngineOutput.EventSummary(type: "BALL_POCKET", time: nil, ids: [ball, pocketId])
+                return CrossEngineOutput.EventSummary(type: "BALL_POCKET", time: eventTime, ids: [ball, pocketId])
             }
         }
 
