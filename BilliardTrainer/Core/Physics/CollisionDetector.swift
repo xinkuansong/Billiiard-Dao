@@ -231,8 +231,8 @@ struct CollisionDetector {
     ///
     /// Collision condition: `|ball_center - arc_center| = arc_radius + ball_radius`
     /// (outer contact). Roots are filtered by:
-    /// 1. Angular range — contact point must lie on the finite arc
-    /// 2. Approach direction — ball must be moving toward the surface (`d(dist)/dt > 0`)
+    /// 1. Approach direction — ball must be moving toward the surface (radial distance decreasing)
+    /// 2. Angular range — contact point must lie on the finite arc
     /// 3. Pocket exclusion — contact point must not fall inside any pocket region
     /// 4. Contact verification — numerical distance must match D within tolerance
     static func ballCircularCushionTime(
@@ -271,17 +271,25 @@ struct CollisionDetector {
             let bx = dpx + dvx * t + hax * t * t
             let bz = dpz + dvz * t + haz * t * t
             
-            // 1) Angular range check
+            // 1) Approach direction: ball must be moving toward the arc surface
+            //    d(dist²)/dt = 2 * (bx * bx' + bz * bz') where bx' = dvx + 2*hax*t
+            //    For valid outer collision: dist is decreasing → d(dist²)/dt < 0
+            let bxDot = dvx + 2.0 * hax * t
+            let bzDot = dvz + 2.0 * haz * t
+            let distSqDot = bx * bxDot + bz * bzDot
+            guard distSqDot < 0 else { continue }
+            
+            // 2) Angular range check
             var angle = Float(atan2(bz, bx))
             if angle < 0 { angle += Float.pi * 2 }
             guard arc.isAngleInRange(angle) else { continue }
             
-            // 2) Contact distance verification (filter numerical noise)
+            // 3) Contact distance verification (filter numerical noise)
             let distSq = bx * bx + bz * bz
             let relError = abs(distSq - D * D) / (D * D)
             guard relError < 0.05 else { continue }
             
-            // 3) Pocket exclusion: skip if contact point falls inside a pocket region
+            // 4) Pocket exclusion: skip if contact point falls inside a pocket region
             let contactWorldX = Float(bx) + arc.center.x
             let contactWorldZ = Float(bz) + arc.center.z
             let contactPos = SCNVector3(contactWorldX, p.y, contactWorldZ)
