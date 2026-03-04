@@ -376,10 +376,17 @@ struct CueStickSettings {
     /// 最大后拉距离 (米)
     static let maxPullBack: Float = 0.3
     
+    /// 后拉匀速速度 (米/秒)
+    /// 用户松手后球杆以此速度匀速回拉到目标位置
+    static let pullBackSpeed: Float = 0.5
+    
+    /// 后拉最短时长 (秒)，防止极低力度时动画过短
+    static let pullBackMinDuration: Double = 0.15
+    
     /// 击球动画时长 (秒)
     static let strokeDuration: Double = 0.12
     
-    /// 后拉动画时长 (秒)
+    /// 后拉动画时长 (秒) — 已弃用，改用 pullBackSpeed 匀速计算
     static let pullBackDuration: Double = 0.05
 }
 

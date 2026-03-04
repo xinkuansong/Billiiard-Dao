@@ -44,6 +44,50 @@ struct RenderFeatureFlags {
     var maxFPS: Int
 }
 
+// MARK: - Ring Buffer for Frame Timing
+
+private struct FrameTimeRingBuffer {
+    private var storage: [CFTimeInterval]
+    private var head: Int = 0
+    private(set) var count: Int = 0
+    let capacity: Int
+
+    init(capacity: Int) {
+        self.capacity = capacity
+        self.storage = [CFTimeInterval](repeating: 0, count: capacity)
+    }
+
+    mutating func append(_ value: CFTimeInterval) {
+        if count < capacity {
+            storage[count] = value
+            count += 1
+        } else {
+            storage[head] = value
+            head = (head + 1) % capacity
+        }
+    }
+
+    func sum() -> CFTimeInterval {
+        guard count > 0 else { return 0 }
+        if count < capacity {
+            return storage[0..<count].reduce(0, +)
+        }
+        return storage.reduce(0, +)
+    }
+
+    func average() -> CFTimeInterval {
+        guard count > 0 else { return 1.0 / 60.0 }
+        return sum() / Double(count)
+    }
+
+    var isFull: Bool { count >= capacity }
+
+    mutating func clear() {
+        head = 0
+        count = 0
+    }
+}
+
 // MARK: - Render Quality Manager
 
 final class RenderQualityManager {
@@ -56,8 +100,8 @@ final class RenderQualityManager {
     /// Explicit per-feature overrides (for A/B comparison screenshots)
     private var overrides: [RenderFeature: Bool] = [:]
 
-    /// Frame timing for dynamic tier adaptation
-    private var recentFrameTimes: [CFTimeInterval] = []
+    /// Frame timing for dynamic tier adaptation (O(1) append via ring buffer)
+    private var recentFrameTimes = FrameTimeRingBuffer(capacity: 60)
     private let frameHistoryCount = 60
     private let tierChangeCooldown: CFTimeInterval = 6.0
     private var tierChangeCooldownUntil: CFTimeInterval = 0
@@ -188,16 +232,12 @@ final class RenderQualityManager {
     @discardableResult
     func recordFrameTime(_ dt: CFTimeInterval) -> Bool {
         recentFrameTimes.append(dt)
-        if recentFrameTimes.count > frameHistoryCount {
-            recentFrameTimes.removeFirst()
-        }
-        let sampleCount = max(1, recentFrameTimes.count)
-        currentFPS = 1.0 / (recentFrameTimes.reduce(0, +) / Double(sampleCount))
+        currentFPS = 1.0 / recentFrameTimes.average()
 
-        guard recentFrameTimes.count >= frameHistoryCount else { return false }
+        guard recentFrameTimes.isFull else { return false }
         let now = CACurrentMediaTime()
-        let avgFPS = 1.0 / (recentFrameTimes.reduce(0, +) / Double(recentFrameTimes.count))
-        recentFrameTimes.removeAll()
+        let avgFPS = 1.0 / recentFrameTimes.average()
+        recentFrameTimes.clear()
 
         guard now > tierChangeCooldownUntil else { return false }
 
@@ -281,7 +321,7 @@ final class RenderQualityManager {
     func setTier(_ tier: RenderTier) {
         currentTier = tier
         featureFlags = RenderQualityManager.flags(for: tier)
-        recentFrameTimes.removeAll()
+        recentFrameTimes.clear()
         consecutiveLowFPSWindows = 0
         consecutiveHighFPSWindows = 0
         tierChangeCooldownUntil = CACurrentMediaTime() + tierChangeCooldown
@@ -321,7 +361,7 @@ final class RenderQualityManager {
 
         let threshold = upgradeThreshold(for: currentTier) - 6.0
         if avgFPS > threshold, currentTier < deviceTier {
-            recentFrameTimes.removeAll()
+            recentFrameTimes.clear()
             consecutiveLowFPSWindows = 0
             consecutiveHighFPSWindows = 0
             tierChangeCooldownUntil = now + tierChangeCooldown

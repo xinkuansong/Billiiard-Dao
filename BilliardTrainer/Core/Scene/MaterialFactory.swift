@@ -11,6 +11,25 @@ import UIKit
 
 final class MaterialFactory {
 
+    // MARK: - Texture Cache (pure functions of size, safe to cache indefinitely)
+
+    private static var feltNormalMapCache: [Int: UIImage] = [:]
+    private static var woodNormalMapCache: [Int: UIImage] = [:]
+
+    static func cachedFeltNormalMap(size: Int) -> UIImage {
+        if let cached = feltNormalMapCache[size] { return cached }
+        let image = generateFeltNormalMap(size: size)
+        feltNormalMapCache[size] = image
+        return image
+    }
+
+    static func cachedWoodGrainNormalMap(size: Int) -> UIImage {
+        if let cached = woodNormalMapCache[size] { return cached }
+        let image = generateWoodGrainNormalMap(size: size)
+        woodNormalMapCache[size] = image
+        return image
+    }
+
     // MARK: - Ball Material (PBR + ClearCoat)
 
     /// Enhance ball materials: ultra-low roughness + clearcoat shader.
@@ -63,7 +82,7 @@ final class MaterialFactory {
     /// Uses both node name heuristics AND material name / diffuse color sampling.
     static func enhanceClothMaterials(in tableNode: SCNNode) {
         let useClothNormal = RenderQualityManager.shared.isEnabled(.clothNormal)
-        let normalMap = useClothNormal ? generateFeltNormalMap(size: 512) : nil
+        let normalMap = useClothNormal ? cachedFeltNormalMap(size: 512) : nil
         var enhanced = 0
 
         enumerateMaterials(in: tableNode) { material, nodeName in
@@ -179,7 +198,7 @@ final class MaterialFactory {
         let qm = RenderQualityManager.shared
         guard qm.isEnabled(.railClearcoat) else { return }
 
-        let woodNormal = generateWoodGrainNormalMap(size: 256)
+        let woodNormal = cachedWoodGrainNormalMap(size: 256)
 
         enumerateMaterials(in: tableNode) { material, nodeName in
             guard isRailMaterial(material, nodeName: nodeName) else { return }

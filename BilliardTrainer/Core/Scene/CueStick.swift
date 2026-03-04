@@ -320,9 +320,30 @@ class CueStick {
     
     // MARK: - Animation
     
-    /// 蓄力后拉动画（逐步增加 pullBack）
-    func animatePullBack(to pullBack: Float, cueBallPosition: SCNVector3, aimDirection: SCNVector3) {
-        update(cueBallPosition: cueBallPosition, aimDirection: aimDirection, pullBack: pullBack)
+    /// 匀速后拉动画：球杆从当前位置匀速回拉到指定 pullBack
+    /// - Parameters:
+    ///   - pullBack: 目标后拉距离
+    ///   - cueBallPosition: 母球位置
+    ///   - aimDirection: 瞄准方向
+    ///   - elevation: 目标仰角
+    ///   - duration: 动画时长（由 pullBack / pullBackSpeed 计算得出）
+    ///   - completion: 动画完成回调
+    func animatePullBack(
+        to pullBack: Float,
+        cueBallPosition: SCNVector3,
+        aimDirection: SCNVector3,
+        elevation: Float = 0,
+        duration: TimeInterval,
+        completion: @escaping () -> Void
+    ) {
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = duration
+        SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .linear)
+        
+        update(cueBallPosition: cueBallPosition, aimDirection: aimDirection, pullBack: pullBack, elevation: elevation)
+        
+        SCNTransaction.completionBlock = completion
+        SCNTransaction.commit()
     }
     
     /// 击球前冲动画
@@ -331,7 +352,6 @@ class CueStick {
     ///   - aimDirection: 瞄准方向
     ///   - completion: 动画完成回调
     func animateStroke(cueBallPosition: SCNVector3, aimDirection: SCNVector3, completion: @escaping () -> Void) {
-        // 快速前冲到母球位置
         SCNTransaction.begin()
         SCNTransaction.animationDuration = CueStickSettings.strokeDuration
         SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeIn)
@@ -339,7 +359,6 @@ class CueStick {
         update(cueBallPosition: cueBallPosition, aimDirection: aimDirection, pullBack: -0.01)
         
         SCNTransaction.completionBlock = { [weak self] in
-            // 击球后隐藏球杆
             self?.hide()
             completion()
         }

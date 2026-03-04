@@ -13,14 +13,30 @@ import simd
 
 final class EnvironmentLightingManager {
 
-    // MARK: - Cube Map Cache
+    // MARK: - Cube Map Cache (per-tier, supports prewarm)
 
-    private static var cachedIBL: (tier: RenderTier, images: [UIImage])?
-    private static var cachedBackground: (tier: RenderTier, images: [UIImage])?
+    private static var iblCache: [RenderTier: [UIImage]] = [:]
+    private static var backgroundCache: [RenderTier: [UIImage]] = [:]
 
     static func invalidateCache() {
-        cachedIBL = nil
-        cachedBackground = nil
+        iblCache.removeAll()
+        backgroundCache.removeAll()
+    }
+
+    /// 启动时在后台预热所有 Tier 的 IBL + 背景贴图，确保 Tier 切换时 100% 命中缓存
+    static func prewarmAllTiers() {
+        DispatchQueue.global(qos: .utility).async {
+            for tier in RenderTier.allCases {
+                let size = max(256, RenderQualityManager.flags(for: tier).environmentMapSize)
+                let ibl = generateIBLCubeMap(size: size)
+                let bg = generateBackgroundCubeMap(size: size)
+                DispatchQueue.main.async {
+                    if iblCache[tier] == nil { iblCache[tier] = ibl }
+                    if backgroundCache[tier] == nil { backgroundCache[tier] = bg }
+                }
+            }
+            print("[EnvironmentLighting] IBL prewarm complete for all tiers")
+        }
     }
 
     // MARK: - Public API
@@ -45,16 +61,16 @@ final class EnvironmentLightingManager {
     }
 
     private static func cachedIBL(for tier: RenderTier, size: Int) -> [UIImage] {
-        if let cached = cachedIBL, cached.tier == tier { return cached.images }
+        if let cached = iblCache[tier] { return cached }
         let images = generateIBLCubeMap(size: size)
-        cachedIBL = (tier, images)
+        iblCache[tier] = images
         return images
     }
 
     private static func cachedBackground(for tier: RenderTier, size: Int) -> [UIImage] {
-        if let cached = cachedBackground, cached.tier == tier { return cached.images }
+        if let cached = backgroundCache[tier] { return cached }
         let images = generateBackgroundCubeMap(size: size)
-        cachedBackground = (tier, images)
+        backgroundCache[tier] = images
         return images
     }
 

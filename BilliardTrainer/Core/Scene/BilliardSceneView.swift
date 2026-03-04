@@ -167,6 +167,13 @@ struct BilliardSceneView: UIViewRepresentable {
         
         @objc private func renderUpdate() {
             let now = displayLink?.timestamp ?? CACurrentMediaTime()
+            
+            // P1-1: 异步物理模拟完成后重置时间戳，避免模拟耗时污染 FPS 采样
+            if viewModel.needsTimestampReset {
+                viewModel.needsTimestampReset = false
+                lastTimestamp = nil
+            }
+            
             viewModel.syncRenderQualityState()
             
             // 轨迹回放：逐帧驱动球位置（必须在 shadow/camera 更新之前）
@@ -230,18 +237,18 @@ struct BilliardSceneView: UIViewRepresentable {
             guard viewModel.scene.cueBallNode != nil else { return }
             
             // 以下功能需要白球存在
-            if viewModel.gameState == .aiming && !isTopDown {
-                let pullBack = (viewModel.currentPower / 100.0) * CueStickSettings.maxPullBack
+            // 回拉动画期间由 SCNTransaction 控制球杆位置，渲染循环不干预
+            if viewModel.gameState == .aiming && !isTopDown && !viewModel.isPreparingStroke {
                 let elevation = CueStick.calculateRequiredElevation(
                     cueBallPosition: cueCenter,
                     aimDirection: viewModel.aimDirection,
-                    pullBack: pullBack,
+                    pullBack: 0,
                     ballPositions: viewModel.scene.targetBallPositions()
                 )
                 viewModel.cueStick?.update(
                     cueBallPosition: cueCenter,
                     aimDirection: viewModel.aimDirection,
-                    pullBack: pullBack,
+                    pullBack: 0,
                     elevation: elevation
                 )
             }
@@ -685,6 +692,22 @@ class BilliardSceneViewModel: ObservableObject {
     private var lastTrajectoryCueBallPos: SCNVector3?
     private var lastTrajectoryAimDirection: SCNVector3?
     
+    /// Coordinator 读取此标志后重置 lastTimestamp，防止异步模拟耗时污染 FPS 采样
+    var needsTimestampReset: Bool = false
+    
+    /// 球杆正在匀速回拉中（用户松手 → 回拉 → 出杆的中间阶段）
+    /// 在此期间：渲染循环跳过球杆位置更新、力度条禁用、瞄准手势阻止
+    @Published private(set) var isPreparingStroke: Bool = false
+    
+    /// 预计算的物理模拟结果（在球杆回拉期间后台计算，回拉完成后立即使用）
+    private var pendingSimulationResult: PrecomputedSimulation?
+    
+    private struct PrecomputedSimulation {
+        let recorder: TrajectoryRecorder
+        let collisionTime: Float?
+        let engine: EventDrivenEngine
+    }
+    
     /// 推进当前击球时间
     func advanceShotTime(delta: Float) {
         currentShotTime += delta
@@ -1021,7 +1044,7 @@ class BilliardSceneViewModel: ObservableObject {
     
     /// 更新瞄准方向
     func updateAimDirection(deltaX: Float, deltaY: Float) {
-        guard gameState == .aiming else { return }
+        guard gameState == .aiming, !isPreparingStroke else { return }
         
         // 在XZ平面上旋转瞄准方向
         let angle = atan2(aimDirection.z, aimDirection.x) + deltaX
@@ -1136,18 +1159,22 @@ class BilliardSceneViewModel: ObservableObject {
     
     // MARK: - Stroke
     
-    /// 使用当前滑条力度执行击球
+    /// 使用当前滑条力度执行击球（两阶段：匀速回拉 → 出杆）
+    ///
+    /// 用户松手后：
+    /// 1. 球杆以匀速从静止位置回拉到力度对应的距离
+    /// 2. 同时后台预计算物理模拟
+    /// 3. 回拉完成后播放前冲出杆动画，应用模拟结果
     func executeStrokeFromSlider() {
-        executeStroke(power: currentPower)
-    }
-    
-    /// 执行击球 — 使用 EventDrivenEngine 计算轨迹并用 SCNAction 回放
-    func executeStroke(power: Float) {
-        guard gameState == .aiming, let cueBall = scene.cueBallNode else { return }
+        let power = currentPower
+        guard gameState == .aiming, !isPreparingStroke, let cueBall = scene.cueBallNode else { return }
         
         let velocity = StrokePhysics.velocity(forPower: power)
         guard velocity > 0 else { return }
         
+        // — 进入回拉准备阶段 —
+        isPreparingStroke = true
+        pendingSimulationResult = nil
         shotEvents.removeAll()
         currentShotTime = 0
         
@@ -1158,24 +1185,23 @@ class BilliardSceneViewModel: ObservableObject {
         let alignmentDot = aimUnit.dot(velUnit)
         print("[StrokeDebug] aimUnit=\(aimUnit), velUnit=\(velUnit), alignmentDot=\(alignmentDot)")
         
-        // 2. 隐藏瞄准线、轨迹预测；播放球杆前冲击球动画
-        cameraContext.mode = .aim3D
-        cameraContext.phase = .shotRunning
-        cameraContext.interaction = .none
-        scene.hideAimLine()
-        scene.hidePredictedTrajectory()
-        scene.hideGhostBall()
-        cueStick?.animateStroke(
-            cueBallPosition: scene.visualCenter(of: cueBall),
-            aimDirection: aimDirection
-        ) {}
-        clearNextTargetSelection()
-        
-        // 3. 创建 EventDrivenEngine 并收集所有球状态
-        let engine = EventDrivenEngine(tableGeometry: scene.tableGeometry)
-        
-        // 母球 — 设置击球后的速度/角速度
         let cueCenter = scene.visualCenter(of: cueBall)
+        
+        // 1. 计算回拉参数
+        let targetPullBack = normalizedPower * CueStickSettings.maxPullBack
+        let elevation = CueStick.calculateRequiredElevation(
+            cueBallPosition: cueCenter,
+            aimDirection: aimDirection,
+            pullBack: targetPullBack,
+            ballPositions: scene.targetBallPositions()
+        )
+        let pullBackDuration = max(
+            TimeInterval(targetPullBack / CueStickSettings.pullBackSpeed),
+            CueStickSettings.pullBackMinDuration
+        )
+        
+        // 2. 后台预计算物理模拟（在球杆回拉期间并行执行）
+        let engine = EventDrivenEngine(tableGeometry: scene.tableGeometry)
         let cueBallState = BallState(
             position: cueCenter,
             velocity: strike.linearVelocity,
@@ -1185,7 +1211,6 @@ class BilliardSceneViewModel: ObservableObject {
         )
         engine.setBall(cueBallState)
         
-        // 目标球
         var sampledTargetCenters: [SCNVector3] = []
         var targetCount = 0
         for ballNode in scene.targetBallNodes {
@@ -1212,42 +1237,101 @@ class BilliardSceneViewModel: ObservableObject {
         }
         print("[StrokeDebug] sampledTargets=\(sampledTargetCenters)")
         
-        // 4. 运行模拟
-        engine.simulate(maxEvents: 500, maxTime: 15.0)
-        let firstBallBall = engine.resolvedEvents.first {
-            if case .ballBall = $0 { return true }
-            return false
-        }
-        print("[StrokeDebug] resolvedEvents=\(engine.resolvedEvents.count), firstBallBall=\(String(describing: firstBallBall))")
-        
-        // 5. 提取事件记录供规则判定
-        extractGameEvents(from: engine)
-        
-        // 6. 获取轨迹记录器用于回放
-        let recorder = engine.getTrajectoryRecorder()
-        lastShotRecorder = recorder
-        
-        // 7. 通知状态机：击球
+        // 预先捕获相机状态
         updateObservationFocusByBestEffort()
         scene.cameraStateMachine.saveAimContext(aimDirection: aimDirection, zoom: scene.currentCameraZoom)
+        
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            engine.simulate(maxEvents: 500, maxTime: 15.0)
+            
+            let firstBallBall = engine.resolvedEvents.first {
+                if case .ballBall = $0 { return true }
+                return false
+            }
+            print("[StrokeDebug] resolvedEvents=\(engine.resolvedEvents.count), firstBallBall=\(String(describing: firstBallBall))")
+            
+            let recorder = engine.getTrajectoryRecorder()
+            let collisionTime = engine.firstBallBallCollisionTime
+            
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let result = PrecomputedSimulation(recorder: recorder, collisionTime: collisionTime, engine: engine)
+                if self.gameState == .ballsMoving {
+                    // 回拉已完成、前冲已触发 → 直接应用结果
+                    self.applySimulationResult(result)
+                } else {
+                    self.pendingSimulationResult = result
+                }
+            }
+        }
+        
+        // 3. 播放球杆匀速回拉动画
+        let capturedAimDirection = aimDirection
+        cueStick?.animatePullBack(
+            to: targetPullBack,
+            cueBallPosition: cueCenter,
+            aimDirection: capturedAimDirection,
+            elevation: elevation,
+            duration: pullBackDuration
+        ) { [weak self] in
+            self?.performForwardStroke(power: power, cueCenter: cueCenter, aimDirection: capturedAimDirection)
+        }
+    }
+    
+    /// 回拉完成后：播放前冲出杆动画并应用预计算结果
+    private func performForwardStroke(power: Float, cueCenter: SCNVector3, aimDirection: SCNVector3) {
+        guard let cueBall = scene.cueBallNode else {
+            isPreparingStroke = false
+            return
+        }
+        
+        // 隐藏瞄准辅助线
+        cameraContext.mode = .aim3D
+        cameraContext.phase = .shotRunning
+        cameraContext.interaction = .none
+        scene.hideAimLine()
+        scene.hidePredictedTrajectory()
+        scene.hideGhostBall()
+        clearNextTargetSelection()
+        
+        // 前冲出杆动画
+        cueStick?.animateStroke(
+            cueBallPosition: scene.visualCenter(of: cueBall),
+            aimDirection: aimDirection
+        ) {}
+        
+        // 相机事件
         scene.cameraStateMachine.handleEvent(.shotFired)
         if let shotPose = scene.captureCurrentCameraPose() {
             cameraContext.shotAnchorPose = shotPose
         }
-
-        gameState = .ballsMoving
-        saveAimCameraMemory()
-
-        // 8. 启动 CADisplayLink 驱动的轨迹回放
-        startTrajectoryPlayback(recorder: recorder)
         
-        // 9. 延迟观察视角：等白球击中目标球后再切换
+        // 切换状态
+        gameState = .ballsMoving
+        isPreparingStroke = false
+        saveAimCameraMemory()
+        
+        // 击球音效
+        playStrokeSound(power: power)
+        
+        // 延迟观察视角上下文
         hasTriggeredObservation = false
-        pendingObservationContactTime = engine.firstBallBallCollisionTime
         pendingObservationContext = (cueBallPosition: cueCenter, aimDirection: aimDirection)
         
-        // 10. 播放击球音效
-        playStrokeSound(power: power)
+        // 应用预计算的模拟结果（通常已在回拉期间完成）
+        if let result = pendingSimulationResult {
+            applySimulationResult(result)
+            pendingSimulationResult = nil
+        }
+    }
+    
+    /// 将预计算的物理模拟结果应用到回放系统
+    private func applySimulationResult(_ result: PrecomputedSimulation) {
+        extractGameEvents(from: result.engine)
+        lastShotRecorder = result.recorder
+        startTrajectoryPlayback(recorder: result.recorder)
+        pendingObservationContactTime = result.collisionTime
+        needsTimestampReset = true
     }
     
     /// 从 EventDrivenEngine 提取游戏事件

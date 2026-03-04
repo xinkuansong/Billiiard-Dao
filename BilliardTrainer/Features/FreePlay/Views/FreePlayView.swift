@@ -115,14 +115,15 @@ struct FreePlayView: View {
                     
                     Spacer()
                     
-                    // 力度选择条（松手即出杆）
+                    // 力度选择条（松手后球杆匀速回拉再出杆）
                     if showGameControls {
                         PowerGaugeView(
                             power: Binding(
                                 get: { viewModel.sceneViewModel.currentPower },
                                 set: { viewModel.sceneViewModel.currentPower = $0 }
                             ),
-                            enabled: viewModel.sceneViewModel.gameState == .aiming,
+                            enabled: viewModel.sceneViewModel.gameState == .aiming
+                                && !viewModel.sceneViewModel.isPreparingStroke,
                             onRelease: {
                                 viewModel.sceneViewModel.executeStrokeFromSlider()
                             }

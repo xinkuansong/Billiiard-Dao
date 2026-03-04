@@ -29,6 +29,7 @@
 
 - **延迟观察视角逻辑**：击球后必须等待首次球-球碰撞时间（`pendingObservationContactTime`）再切换视角，若无碰撞则使用后备延迟（`observationFallbackDelay = 0.8` 秒）。不可在无替代方案时删除此逻辑，否则会导致视角过早切换，用户体验混乱。
 - **GameState 转换顺序**：`.idle` → `.placing` → `.aiming` → `.ballsMoving` → `.turnEnd`，不可跳过中间状态或反向转换。
+- **球杆两阶段出杆时序**：用户松手后进入 `isPreparingStroke` 阶段（gameState 仍为 `.aiming`），球杆以 `pullBackSpeed` 匀速回拉，同时后台预计算物理模拟。回拉完成后播放前冲动画并切换到 `.ballsMoving`。在 `isPreparingStroke` 期间：渲染循环不更新球杆位置（由 SCNTransaction 动画控制）、瞄准手势禁止、力度条禁用。
 - **轨迹回放时序**：必须在 `CADisplayLink` 的 `renderUpdate()` 中先调用 `updateTrajectoryPlaybackFrame()`，再更新阴影和相机，确保球位置先于视觉反馈更新。
 
 ### 常量与阈值清单
@@ -38,6 +39,8 @@
 | `TablePhysics.height` | 0.71 m | Physics 模块定义 | 球 Y 坐标约束，台面高度 |
 | `BallPhysics.radius` | 0.028575 m | Physics 模块定义 | 球 Y 坐标约束，碰撞检测 |
 | `CueStickSettings.maxElevation` | 30° | 球杆物理限制 | 球杆仰角上限 |
+| `CueStickSettings.pullBackSpeed` | 0.5 m/s | 真实击球节奏 | 球杆回拉动画速度（匀速） |
+| `CueStickSettings.pullBackMinDuration` | 0.15 s | 最低可感知时长 | 极低力度时的回拉最短动画 |
 | `observationFallbackDelay` | 0.8 s | 延迟观察视角后备延迟 | 无碰撞时的视角切换时机 |
 | `RenderQualityManager` 帧率阈值 | 低/中/高分级 | 动态质量适配 | 渲染性能与画质平衡 |
 | `TableModelLoader` 缩放范围 | 0.0001-1000 | 模型加载验证 | 防止异常缩放导致物理错误 |
@@ -50,7 +53,8 @@
 ```
 idle --[setupTrainingScene]--> placing
 placing --[球位置确认]--> aiming
-aiming --[executeStroke]--> ballsMoving
+aiming --[松手触发 executeStrokeFromSlider]--> aiming(isPreparingStroke=true, 球杆匀速回拉)
+aiming(isPreparingStroke) --[回拉完成 performForwardStroke]--> ballsMoving
 ballsMoving --[所有球静止]--> turnEnd
 turnEnd --[重置/下一回合]--> idle/aiming
 ```
@@ -81,10 +85,17 @@ turnEnd --[重置/下一回合]--> idle/aiming
 - **渲染循环热点**：`CADisplayLink.renderUpdate()` 每帧调用，包含轨迹回放、阴影更新、相机更新，复杂度 O(n)（n = 球数量）。
 - **轨迹回放复杂度**：`TrajectoryPlayback.update(to:)` 线性查找时间点，复杂度 O(m)（m = 记录的事件数量）。
 - **阴影更新**：每帧更新所有球影位置，复杂度 O(n)。
+- **物理模拟异步化**：`executeStroke()` 中的 `engine.simulate()` 在后台线程 (`DispatchQueue.global(.userInitiated)`) 执行，避免主线程阻塞 20-80ms（满台开球场景）。模拟完成后通过 `DispatchQueue.main.async` 回到主线程设置回放和事件。击球后立即设置 `gameState = .ballsMoving` 阻止重复击球，`trajectoryPlayback == nil` 期间帧循环安全跳过回放。
+- **FPS 采样隔离**：异步模拟完成后设置 `needsTimestampReset` 标志，Coordinator 在下帧重置 `lastTimestamp`，防止模拟耗时被计入 FPS 采样导致误判 Tier 降级。
+- **FPS 采样数据结构**：`RenderQualityManager` 使用 `FrameTimeRingBuffer`（固定容量 60 的环形缓冲区），`append` 和 `clear` 均为 O(1)。
 - **缓存策略**：
   - `visualCenter()` 结果可缓存（球节点位置不变时）
   - 轨迹预测节流：`lastTrajectoryPreviewTimestamp` 限制更新频率
   - 渲染质量分级：基于帧时长动态适配，避免持续高负载
+  - IBL 立方体贴图：`EnvironmentLightingManager` 按 Tier 维度缓存 IBL + 背景贴图（`iblCache`/`backgroundCache` 字典），启动时 `prewarmAllTiers()` 在后台预生成所有 Tier 的贴图，确保 Tier 切换时 100% 命中缓存
+  - 法线贴图：`MaterialFactory` 按尺寸缓存 felt/wood 法线贴图（`feltNormalMapCache`/`woodNormalMapCache`），避免 Tier 切换时重复生成
+  - 材质批量提交：`reapplyMaterialsAndEnvironment()` 使用 `SCNTransaction` 批量提交材质变更
+- **相机射线检测优化**：`applyCameraRaycastRadiusConstraint()` 仅在相机位置变化 > 0.01m 时执行 `hitTestWithSegment`，相机静止时跳过（缓存 `lastHitTestCameraPosition`）
 
 ## 参考实现对照（如适用）
 
@@ -145,3 +156,29 @@ turnEnd --[重置/下一回合]--> idle/aiming
   - `reapplyRenderSettings(deferMaterials:)` 在自动降级时将材质工作异步延迟，不阻塞当前帧
   - `RenderQualityManager.requestUpgradeEvaluation()` 在球停后启动恢复评估，使用降低的阈值（`upgradeThreshold - 6`）和缩短的采样窗口（30 帧），给设备恢复画质的机会
 - **后果**：降级不再引发级联帧丢失；球停后 2 秒开始恢复评估，若 FPS 达标则自动升级一级（失败则保持当前档位）。
+
+### ADR-006：帧循环性能优化（2026-03-04）
+
+- **背景**：基于 `docs/real-time-mainloop-spec.md` 的深度分析，帧循环存在多个性能瓶颈：(1) `engine.simulate()` 在主线程同步执行导致开球帧 20-80ms jank；(2) Tier 切换时 IBL 缓存未命中 + 全场景材质遍历在主线程执行；(3) 相机防穿墙 hitTest 每帧无条件执行；(4) FPS 采样数组使用 O(n) `removeFirst`。
+- **候选方案**：完整改造方案或逐步优化。
+- **结论**：逐步优化，按优先级分 4 阶段：
+  - **P0-1**：`executeStroke()` 中的 `engine.simulate()` 异步化至 `DispatchQueue.global(.userInitiated)`，主线程仅做状态切换和 UI 更新。结合 P1-1：异步完成后设置 `needsTimestampReset` 标志防止 FPS 采样污染。
+  - **P0-2**：`EnvironmentLightingManager.prewarmAllTiers()` 启动时后台预热所有 Tier 的 IBL 贴图，缓存从单 tier 扩展为 `[RenderTier: [UIImage]]` 字典。
+  - **P0-3**：`MaterialFactory` 缓存 felt/wood 法线贴图；`reapplyMaterialsAndEnvironment()` 使用 `SCNTransaction` 批量提交。
+  - **P1-2**：`applyCameraRaycastRadiusConstraint()` 增加相机位置变化阈值检查，静止时跳过 hitTest。
+  - **P2-2**：`RenderQualityManager.recentFrameTimes` 从 `[CFTimeInterval]` 替换为 `FrameTimeRingBuffer`（O(1) append）。
+- **后果**：开球帧 jank 从 20-80ms 降至 <1ms（主线程）；Tier 切换帧峰从 5-40ms 降至 ~1-3ms；正常帧逻辑预算从 ~1-4ms 减少约 0.2-1ms（hitTest 节省）。
+
+### ADR-007：两阶段出杆（匀速回拉 → 前冲）（2026-03-04）
+
+- **背景**：原实现中力度滑条与球杆位置实时联动（`pullBack = currentPower/100 * maxPullBack`），松手即出杆。这不符合真实台球击球节奏（先确定力度、再拉杆、再出杆），且出杆动作过于突然。
+- **候选方案**：
+  1. 保持原联动行为（简单但不自然）
+  2. 松手后球杆匀速回拉到目标位置，回拉完成后前冲出杆；同时利用回拉时间预计算物理模拟（自然且性能更优）
+- **结论**：选择方案 2。
+  - 瞄准阶段球杆保持静止（`pullBack = 0`），不跟随滑条
+  - 松手后进入 `isPreparingStroke` 阶段，球杆以 `pullBackSpeed = 0.5 m/s` 匀速回拉
+  - 回拉期间后台 `DispatchQueue.global(.userInitiated)` 并行执行物理模拟
+  - 回拉完成后 `performForwardStroke()`：前冲动画 + 应用预计算结果
+  - `isPreparingStroke` 期间禁止瞄准手势、力度条交互，渲染循环不覆盖球杆动画
+- **后果**：击球体验更自然（100% 力度回拉 0.6s → 前冲 0.12s）；物理模拟在回拉期间完成（典型 20-80ms），用户无感知延迟。

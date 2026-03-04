@@ -53,6 +53,9 @@ class BilliardScene: SCNScene {
 
     /// 上帧白球 XZ 位置，用于检测白球是否实际移动
     private var lastTrackedCueBallXZ: SIMD2<Float>?
+    
+    /// 上次 hitTest 时的相机位置，仅在位置显著变化时重新执行射线检测
+    private var lastHitTestCameraPosition: SCNVector3?
 
     /// 相机节点
     private(set) var cameraNode: SCNNode!
@@ -125,6 +128,7 @@ class BilliardScene: SCNScene {
     
     private func setupScene() {
         setupEnvironment()
+        EnvironmentLightingManager.prewarmAllTiers()
         setupGround()
         setupTable()
         setupLights()
@@ -1213,6 +1217,7 @@ class BilliardScene: SCNScene {
     func setCameraMode(_ mode: CameraMode, animated: Bool = true) {
         let resolvedMode: CameraMode = (mode == .action) ? .aim : mode
         currentCameraMode = resolvedMode
+        invalidateHitTestCache()
         guard let cameraRig else { return }
 
         switch resolvedMode {
@@ -1562,8 +1567,15 @@ class BilliardScene: SCNScene {
 
     private func applyCameraRaycastRadiusConstraint() {
         guard let cameraRig else { return }
-        let from = cameraRig.currentPivot
         let to = cameraNode.position
+        
+        if let lastPos = lastHitTestCameraPosition {
+            let delta = (to - lastPos).length()
+            if delta < 0.01 { return }
+        }
+        lastHitTestCameraPosition = to
+        
+        let from = cameraRig.currentPivot
         let hits = rootNode.hitTestWithSegment(from: from, to: to, options: nil)
         guard let first = hits.first else { return }
 
@@ -1574,6 +1586,11 @@ class BilliardScene: SCNScene {
         let dist = (first.worldCoordinates - from).length()
         let safeRadius = max(TrainingCameraConfig.minDistance, dist - 0.05)
         cameraRig.setTargetZoom(cameraRig.zoomForRadius(safeRadius))
+    }
+    
+    /// 重置 hitTest 缓存（相机模式切换或击球事件后调用）
+    func invalidateHitTestCache() {
+        lastHitTestCameraPosition = nil
     }
 
     func returnCameraToAim(animated: Bool) {
@@ -1909,7 +1926,7 @@ class BilliardScene: SCNScene {
     func setupRackLayout() {
         let R = BallPhysics.radius
         // 开球三角应紧密贴球；过大间隙会导致只撞动第一颗，无法传递
-        let gap: Float = 0.0016
+        let gap: Float = 0.001
         let rowOffset = (R * 2 + gap) * sqrt(3.0) / 2.0
         
         // 置球点 (foot spot): 台面左半区 1/4 处，三角阵从这里向 -X 展开（远离白球）
@@ -2051,8 +2068,10 @@ class BilliardScene: SCNScene {
     }
 
     /// Reapply all rendering settings to reflect current tier / overrides.
-    /// - Parameter deferMaterials: When true, heavy material work is deferred
-    ///   to avoid blocking the current frame (used during auto quality changes).
+    /// - Parameter deferMaterials: When true, material work is deferred to
+    ///   the next RunLoop iteration to avoid blocking the current frame
+    ///   (used during auto quality changes). IBL and normal map textures
+    ///   are pre-cached, so the deferred work is lightweight (~1-3ms).
     func reapplyRenderSettings(deferMaterials: Bool = false) {
         reapplyLightSettings()
         reapplyCameraSettings()
@@ -2067,11 +2086,14 @@ class BilliardScene: SCNScene {
     }
 
     private func reapplyMaterialsAndEnvironment() {
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0
         setupEnvironment()
         enhanceBallMaterials()
         MaterialFactory.enhanceClothMaterials(in: tableNode)
         MaterialFactory.enhanceRailMaterials(in: tableNode)
         MaterialFactory.enhancePocketMaterials(in: tableNode)
+        SCNTransaction.commit()
     }
 
     private func reapplyLightSettings() {

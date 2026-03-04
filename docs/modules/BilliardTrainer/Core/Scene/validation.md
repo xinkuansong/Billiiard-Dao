@@ -79,6 +79,9 @@
 | MaterialFactory 着色器兼容性 | 中 | 在低端设备（A12 以下）验证 clearcoat shader |
 | EnvironmentLightingManager IBL 质量 | 低 | 对比 HDRI 与程序化 IBL 在不同场景的视觉差异 |
 | 手势路由在不同 gameState 下的覆盖度 | 中 | 补充 InputRouter 的状态组合测试 |
+| 异步物理模拟线程安全 | 中 | 验证 executeStroke 快速连续调用不会导致竞态（gameState guard 已阻止，但需验证边界） |
+| IBL prewarm 与首帧竞争 | 低 | 验证 prewarm 未完成时首次 Tier 切换的表现（应 fallback 到同步生成） |
+| hitTest 缓存失效覆盖度 | 低 | 验证相机模式切换后 invalidateHitTestCache 是否覆盖所有路径 |
 
 ## 变更验证记录
 
@@ -93,3 +96,5 @@
 | 2026-03-01 | 彻底修复白球不可见：将白球提取从独立函数 `extractCueBallFromModel` 合并回主球提取循环 `setupModelBalls()`，与目标球复用完全相同的提取代码路径；删除独立函数消除潜在差异；`TableModelLoader.ballNodeNames` 增加 `BaiQiu` 确保边界框计算一致 | 编译通过；白球与目标球走相同提取路径，消除了独立函数可能引入的 closure/coordinate/visibility 差异 | 合并后仍不可见，根因为双重缩放 |
 | 2026-03-01 | 修复双重缩放根因：BaiQiu Xform 自带 localScale≈0.001（网格顶点 28 单位），提取时 worldScale=0.001 已包含此 localScale，但 anchorNode reparent 后仍保留 0.001 的 localScale，导致 effectiveScale=0.001×0.001=0.000001（球仅 0.028mm）。修复方式：`anchorNode.removeFromParentNode()` 后立即 `anchorNode.transform = SCNMatrix4Identity` 重置为单位矩阵；增加 `ensureCueBallRenderable()` 后处理（诊断 + 强制不透明 + 程序化球兜底） | 编译通过；目标球 localScale≈1.0 不受影响；白球 effectiveScale 修复为 0.001×1.0=0.001（世界半径 28×0.001=0.028m 正确） | 待真机/模拟器验证：白球在桌面可见且尺寸正确 |
 | 2026-03-02 | 修复渲染质量降级后帧率不恢复：(1) EnvironmentLightingManager 按 tier 缓存 IBL/背景立方体贴图；(2) reapplyRenderSettings 在自动降级时延迟材质重刷；(3) RenderQualityManager 新增球停后恢复评估机制 | 编译通过；影响面：RenderQualityManager、EnvironmentLightingManager、BilliardScene、BilliardSceneView | 待真机验证：开球 → 帧率降级 → 球停后自动恢复画质 |
+| 2026-03-04 | 帧循环性能优化（基于 real-time-mainloop-spec.md）：(P0-1) engine.simulate() 异步化至后台线程 + FPS 采样隔离；(P0-2) IBL prewarm 启动时后台预热所有 Tier；(P0-3a) MaterialFactory 缓存 felt/wood 法线贴图；(P0-3b) reapplyMaterialsAndEnvironment 使用 SCNTransaction 批量提交；(P1-2) applyCameraRaycastRadiusConstraint 增加位置变化阈值跳过；(P2-2) FPS 采样替换为 FrameTimeRingBuffer | 编译通过；影响面：BilliardSceneView（executeStroke 异步化、renderUpdate needsTimestampReset）、EnvironmentLightingManager（prewarm + per-tier 字典缓存）、MaterialFactory（法线贴图缓存）、BilliardScene（SCNTransaction + hitTest 缓存 + invalidateHitTestCache）、RenderQualityManager（FrameTimeRingBuffer） | 待真机验证：(1) 开球帧无卡顿（异步模拟生效）；(2) Tier 切换无帧峰（IBL prewarm 命中缓存）；(3) 正常帧率稳定（hitTest 优化生效）；(4) 连续击球不竞态 |
+| 2026-03-04 | 两阶段出杆：力度条松手后球杆匀速回拉→前冲出杆；回拉期间后台预计算物理模拟 | 编译通过、无 lint 错误；影响面：BilliardSceneView（executeStrokeFromSlider 重构为两阶段、新增 isPreparingStroke/pendingSimulationResult/performForwardStroke/applySimulationResult、renderUpdate 中 pullBack 改为 0）、CueStick（animatePullBack 增加 elevation/duration/completion 参数）、PhysicsConstants（新增 pullBackSpeed/pullBackMinDuration）、FreePlayView + TrainingSceneView（PowerGaugeView enabled 增加 !isPreparingStroke 条件） | 待真机验证：(1) 松手后球杆匀速回拉再出杆；(2) 不同力度下回拉时长符合预期（100%→0.6s, 50%→0.3s）；(3) 回拉期间滑条禁用、瞄准手势禁止；(4) 出杆后球运动正常、回放同步 |
