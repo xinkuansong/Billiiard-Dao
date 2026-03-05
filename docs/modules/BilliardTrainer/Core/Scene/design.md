@@ -45,6 +45,42 @@
 | `RenderQualityManager` 帧率阈值 | 低/中/高分级 | 动态质量适配 | 渲染性能与画质平衡 |
 | `TableModelLoader` 缩放范围 | 0.0001-1000 | 模型加载验证 | 防止异常缩放导致物理错误 |
 | `TableModelLoader` 表面高度范围 | -1 到 10 m | 模型加载验证 | 防止异常高度导致球位置错误 |
+| `MaterialFactory.normalIntensityFeltFallback` | 0.055 | 程序化 felt 法线兜底强度 | USDZ 有法线贴图时不写此值 |
+| `MaterialFactory.normalIntensityWoodFallback` | 0.35 | 程序化木纹法线兜底强度 | USDZ 有法线贴图时不写此值 |
+| Key Light pitch | -68° | 模拟 1m 灯箱自然斜照角度 | 改变高光位置与阴影方向 |
+| Key Light yaw | 18° | 避免对称死亮点 | 轻微偏移让高光更自然 |
+| Key Light intensity | 820 lm | 配合三联灯箱 IBL 提升后补偿 Key 强度 | 过高会过曝，过低会暗 |
+| Key Light shadowBias | 0.008 | 消除 Peter Panning（球漂浮阴影） | 过大导致漂浮，过小导致自阴影噪声 |
+| Key Light shadowColor alpha | 0.30 | 稍强阴影更好锚定球到台面 | 改变球阴影深度感 |
+| Fill Light intensity | 130 lm | 补亮袋口/木边暗部，防死黑 | 过高降低对比度，过低袋口仍死黑 |
+| Fill Light pitch/yaw | -30°/-40° | 从左前方补光，与 Rim 方向相反 | 改变桌面暗部分布 |
+| Rim Light intensity | 120 lm | 轮廓分离光（Fill 加入后减弱） | 过高会过曝边缘 |
+| IBL 三联灯箱 lampColor | (0.86, 0.84, 0.80) | 暖白灯箱主体色 | 影响球体镜面反射色温 |
+| IBL 三联灯箱 coreColor | (0.98, 0.96, 0.92) | 灯管热点色（比 lamp ×1.15） | 影响球体高光中心亮度 |
+| IBL 灯箱 w/h/r | 0.72/0.10/0.05 (UV) | 胶囊形灯箱尺寸 | 影响球体反射光斑形状（条形） |
+| IBL 灯箱 y-offsets | [-0.12, 0.0, +0.12] | 三条灯箱中心偏移 | 影响反射条纹间距 |
+| IBL halo w/h scale | 1.10/1.80 | 灯罩散射扩展倍率 | 影响灯箱外晕宽度 |
+| IBL halo intensity | 0.14 | 灯罩散射强度 | 过高洗平高光，过低无散射感 |
+| IBL bounce rx/ry | 0.55/0.40 | 天花反弹光椭圆半径 | 影响顶面整体亮度分布 |
+| IBL bounce intensity | 0.08 | 天花反弹光强度 | 过高产生新硬高光 |
+| IBL feather | 0.015 (UV) | smoothstep 柔边宽度 | 影响灯箱边缘锐度 |
+| IBL ceilingBase | (0.10, 0.11, 0.13) | 天花板基底色（冷灰蓝） | 影响非灯区暗部 |
+| IBL wallTop | (0.20, 0.21, 0.24) | 真实球厅墙壁为浅色 | 影响球体侧面反射 |
+| IBL wallBot | (0.10, 0.10, 0.12) | 墙脚较暗 | 影响桌面边缘反射 |
+| IBL floor | (0.06, 0.07, 0.08) | 地面反弹光 | 影响球底部环境光 |
+| IBL intensity (low/medium/high) | 0.95 / 1.60 / 1.80 | 三联灯箱升级后重新校准（medium+0.15, high+0.20） | 影响全局环境光强度 |
+| SSAO radius (medium/high) | 0.06 | 收窄至接触阴影尺度，避免大范围压暗 | 过大导致台布整体偏暗 |
+| SSAO intensity (medium/high) | 0.22 | 补偿半径减小后的视觉强度 | 过高导致台布死黑 |
+| High tier shadowSampleCount | 32 | 高端设备软阴影更平滑 | 增加 GPU 负载 |
+| High tier shadowRadius | 12 | 略软化高端阴影边缘 | 过大影响阴影清晰度 |
+| Ball roughness | 0.06 | 真实酚醛树脂球（0.05-0.08 区间） | 过低（0.033）产生不真实镜面感 |
+| Contact shadow baseAlpha | 0.62 | 保留中心压暗，但让小半径阴影仍保持渐变 | 过低会重新变得不明显 |
+| Contact shadow exponent | 2.2 | 保持明显的径向渐变，避免小阴影盘边缘发硬 | 过低会显得发灰 |
+| Contact shadow radius multiplier | 0.48 × Ball radius | 将接触阴影收进球底中心区域，并比 0.42 稍微放大一点 | 过大又会回到黑盘感 |
+| Contact shadow Y offset | TablePhysics.height + 0.003 m | 明确抬到台泥视觉表面之上，避免被模型网格盖住 | 过高会显得悬浮 |
+| Contact shadow renderingOrder | 20 | 让透明阴影盘在台泥之后稳定叠加 | 过高且深度策略错误会穿帮 |
+| Contact shadow blendMode | multiply | 以“压暗台泥”而非“叠黑片”的方式显示接触阴影 | 若贴图过黑会像污渍 |
+| Contact shadow material transparency | 0.52 | 让 multiply 强度退回辅助层级 | 过低会看不见阴影 |
 
 ## 状态机 / 事件模型
 
@@ -182,3 +218,37 @@ turnEnd --[重置/下一回合]--> idle/aiming
   - 回拉完成后 `performForwardStroke()`：前冲动画 + 应用预计算结果
   - `isPreparingStroke` 期间禁止瞄准手势、力度条交互，渲染循环不覆盖球杆动画
 - **后果**：击球体验更自然（100% 力度回拉 0.6s → 前冲 0.12s）；物理模拟在回拉期间完成（典型 20-80ms），用户无感知延迟。
+
+### ADR-008：台球厅灯光优化（2026-03-06）
+
+- **背景**：原三灯系统（Key pitch -82° + Rim + IBL）中主光过于垂直，导致球高光在顶部集中为一点、阴影直落正下方，与参考图差异明显；缺少 Fill Light 使袋口和木边出现死黑区域；IBL 天花板灯笼暗淡，球体反射无明显灯箱轮廓；SSAO radius 0.12 过大导致台布整体压暗而非点接触阴影。
+- **候选方案**：
+  1. 使用真实 HDR 台球厅环境贴图（视觉最好，但需外部资源）
+  2. 调整现有程序化 IBL + 四灯参数（无需外部资源，运行时生成）
+- **结论**：选择方案 2，无需外部资源依赖，参数可调。
+  - Key Light 从 pitch -82°/yaw 0° 改为 pitch -68°/yaw 18°，更接近真实灯箱斜照
+  - 新增 Fill Light（intensity 130, pitch -30°, yaw -40°），补亮桌面暗部与袋口
+  - Rim Light 强度从 150 降至 120，平衡 Fill 加入后的整体亮度
+  - shadowBias 从 0.02 降至 0.008，消除球漂浮的 Peter Panning 现象
+  - IBL 天花板灯笼核心从 0.72 升至 0.92，灯笼范围从 rx 0.18/ry 0.12 扩大至 rx 0.22/ry 0.15
+  - IBL 墙面亮度提升（top: 0.15→0.20），地面微增（0.045→0.06）
+  - SSAO radius 从 0.12 收窄至 0.06，intensity 从 0.18 升至 0.22（接触阴影更精准）
+  - High tier shadow samples 从 16 升至 32，radius 从 10 升至 12
+  - 球材质 roughness 从 0.033 调至 0.06（符合真实酚醛树脂球物理范围）
+- **后果**：视觉效果更接近真实球厅，Ball 高光从顶部点变为侧面扩散区；Fill Light 消除死黑角；球影触地更真实；IBL 可在球面看到灯箱轮廓反射。不增加 shadow caster（Fill/Rim 无投影），性能影响极小。
+
+### ADR-009：IBL 三联灯箱升级（2026-03-06）
+
+- **背景**：ADR-008 将 IBL 天花板从暗淡小灯笼改为更亮的椭圆灯盘，但仍使用硬边 `d²<1` 切断，导致球面高光偏圆偏"贴图感"；缺少灯罩散射（softbox diffusion）和天花反弹光（ceiling bounce），与真实球厅三联长条灯箱差异明显。
+- **候选方案**：
+  1. 引入真实 HDR 环境贴图替代程序化 IBL（视觉最佳，但需外部资源且不可调参）
+  2. 升级程序化 IBL 顶面为三联胶囊灯箱 + 灯罩散射 + 天花反弹光（无外部依赖，参数可调）
+- **结论**：选择方案 2，仅修改 `EnvironmentLightingManager.renderIBLCeiling()`，不改变灯光/材质/背景/分辨率/缓存逻辑。
+  - 顶面从单一硬边椭圆改为 4 层叠加：ceilingBase → bounce → halo×3 → lamp+core×3
+  - 三条胶囊灯箱（w=0.72, h=0.10, r=h×0.5）中心 y 偏移 [-0.12, 0.0, +0.12]
+  - 每条灯箱内嵌 core 热线（h=0.035, color=(0.98,0.96,0.92)）模拟灯管高光
+  - 每条灯箱外扩 halo（w×1.10, h×1.80, intensity=0.14）模拟灯罩散射
+  - 全面使用 `roundedRectSDF` + `smoothstep(feather=0.015)` 柔边，杜绝硬切
+  - 天花反弹光（bounce rx=0.55, ry=0.40, intensity=0.08）大范围低频暖提升
+  - 新增 `DebugIBLMode`（.normal/.showTopFaceOnly/.exaggerated）便于验证
+- **后果**：球面高光从圆点变为明显的三条长条灯箱反射；木边清漆反射更自然（无硬边裁切）；IBL 顶面平均亮度提升约 10-15%；运行时开销不变（仍为初始化/切档时一次生成）。

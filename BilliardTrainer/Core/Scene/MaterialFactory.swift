@@ -16,6 +16,24 @@ final class MaterialFactory {
     private static var feltNormalMapCache: [Int: UIImage] = [:]
     private static var woodNormalMapCache: [Int: UIImage] = [:]
 
+    // MARK: - Normal Intensity Constants
+
+    /// USDZ 自带法线贴图时不主动修改强度（intensity 保持模型原始值，此常量仅作文档用）
+    private static let normalIntensityUSDZCloth: CGFloat        = 1.0
+    /// USDZ 自带法线贴图时显式覆盖强度（消除悬浮感的微结构增强）
+    private static let normalIntensityUSDZClothOverride: CGFloat = 1.2
+    /// 程序化 felt 法线兜底强度（比 USDZ 原始法线弱，避免过度凹凸）
+    private static let normalIntensityFeltFallback: CGFloat = 0.055
+    /// USDZ 自带木纹法线时不主动修改强度（intensity 保持模型原始值，此常量仅作文档用）
+    private static let normalIntensityUSDZWood: CGFloat    = 1.0
+    /// 程序化木纹法线兜底强度
+    private static let normalIntensityWoodFallback: CGFloat = 0.35
+
+    // MARK: - Roughness Override Constants
+
+    /// 台布 USDZ roughness 贴图存在时，叠加一个标量 multiply 来整体降低光泽度
+    private static let roughnessUSDZClothOverride: CGFloat = 0.88
+
     static func cachedFeltNormalMap(size: Int) -> UIImage {
         if let cached = feltNormalMapCache[size] { return cached }
         let image = generateFeltNormalMap(size: size)
@@ -43,7 +61,7 @@ final class MaterialFactory {
         if let geometry = node.geometry {
             for material in geometry.materials {
                 material.lightingModel = .physicallyBased
-                material.roughness.contents = Float(0.033)
+                material.roughness.contents = Float(0.045)
                 material.metalness.contents = Float(0.0)
 
                 // Remove any USDZ normal map — real billiard balls are perfectly smooth
@@ -80,6 +98,13 @@ final class MaterialFactory {
 
     /// Enhance table cloth (felt) material found in a USDZ model node tree.
     /// Uses both node name heuristics AND material name / diffuse color sampling.
+    ///
+    /// Strategy:
+    /// - lightingModel / roughness / metalness are always set (safe PBR defaults).
+    /// - normal: if the USDZ already provides a texture, keep it and do NOT replace the
+    ///   contents; only apply a fallback procedural normal when none is present.
+    /// - roughness / metalness: if the USDZ already baked a texture into the channel,
+    ///   keep it; only write a scalar default when the channel has no texture.
     static func enhanceClothMaterials(in tableNode: SCNNode) {
         let useClothNormal = RenderQualityManager.shared.isEnabled(.clothNormal)
         let normalMap = useClothNormal ? cachedFeltNormalMap(size: 512) : nil
@@ -88,29 +113,68 @@ final class MaterialFactory {
         enumerateMaterials(in: tableNode) { material, nodeName in
             guard isClothMaterial(material, nodeName: nodeName) else { return }
 
-            material.lightingModel = .physicallyBased
-            material.roughness.contents = Float(0.89)
-            material.metalness.contents = Float(0.0)
+            #if DEBUG
+            debugLogMaterialSnapshot(material, nodeName: nodeName, tag: "BEFORE cloth enhance")
+            #endif
 
-            if let normalMap {
+            material.lightingModel = .physicallyBased
+
+            // --- roughness ---
+            // When USDZ provides a roughness texture, override with a scalar to reduce cloth shininess.
+            // When no texture is present, use the fallback scalar.
+            let roughnessSource: String
+            if hasTextureContents(material.roughness.contents) {
+                material.roughness.contents = Float(roughnessUSDZClothOverride)
+                roughnessSource = "override(\(roughnessUSDZClothOverride))"
+            } else {
+                material.roughness.contents = Float(0.89)
+                roughnessSource = "default(0.89)"
+            }
+
+            // --- metalness ---
+            let metalnessSource: String
+            if !hasTextureContents(material.metalness.contents) {
+                material.metalness.contents = Float(0.0)
+                metalnessSource = "default(0.0)"
+            } else {
+                metalnessSource = "USDZ texture"
+            }
+
+            // --- normal ---
+            // If USDZ already provides a normal texture, keep it untouched (contents + intensity).
+            // Only install the procedural fallback when no texture is present.
+            let normalSource: String
+            if hasTextureContents(material.normal.contents) {
+                // USDZ-sourced normal: keep contents, override intensity for controlled micro-structure.
+                material.normal.intensity = normalIntensityUSDZClothOverride
+                normalSource = "USDZ texture(intensity=\(normalIntensityUSDZClothOverride))"
+            } else if let normalMap {
                 material.normal.contents = normalMap
-                material.normal.intensity = 0.055
+                material.normal.intensity = normalIntensityFeltFallback
                 material.normal.wrapS = .repeat
                 material.normal.wrapT = .repeat
                 material.normal.contentsTransform = SCNMatrix4MakeScale(14, 14, 1)
+                normalSource = "generated(felt, intensity=\(normalIntensityFeltFallback))"
             } else {
                 material.normal.contents = nil
                 material.normal.intensity = 0
+                normalSource = "none(quality disabled)"
             }
 
-            // Darken ~8% + desaturate ~8% (remove fluorescent feel)
-            if let color = material.diffuse.contents as? UIColor {
-                var h: CGFloat = 0, s: CGFloat = 0, b_: CGFloat = 0, a: CGFloat = 0
-                color.getHue(&h, saturation: &s, brightness: &b_, alpha: &a)
-                material.diffuse.contents = UIColor(hue: h, saturation: s * 0.92, brightness: b_ * 0.92, alpha: a)
-            } else if extractImage(from: material.diffuse.contents) != nil {
+            // Slightly desaturate / darken diffuse (~8%).
+            // Always use the multiply channel so the adjustment is idempotent across
+            // multiple reapplyMaterialsAndEnvironment calls — writing directly to
+            // diffuse.contents would compound the darkening each call.
+            if material.diffuse.contents is UIColor || extractImage(from: material.diffuse.contents) != nil {
                 material.multiply.contents = UIColor(red: 0.90, green: 0.93, blue: 0.90, alpha: 1.0)
             }
+
+            #if DEBUG
+            debugLogEnhanceSummary(material, nodeName: nodeName,
+                                   normalSource: normalSource,
+                                   roughnessSource: roughnessSource,
+                                   metalnessSource: metalnessSource)
+            #endif
 
             enhanced += 1
         }
@@ -119,12 +183,13 @@ final class MaterialFactory {
 
     /// Detect cloth/felt material by node name, material name, or diffuse color analysis.
     private static func isClothMaterial(_ material: SCNMaterial, nodeName: String?) -> Bool {
-        let nName = (nodeName ?? "").lowercased()
-        let mName = (material.name ?? "").lowercased()
+        let nName = normalizeIdentifier(nodeName ?? "")
+        let mName = normalizeIdentifier(material.name ?? "")
         let combined = nName + " " + mName
 
-        // Name-based detection
-        let clothKeywords = ["cloth", "felt", "surface", "taibu", "tai_ni",
+        // Name-based detection — identifiers are normalized (lowercased, stripped of _/-/spaces)
+        // so TaiNi / tai_ni / tai-ni / taini all collapse to "taini"
+        let clothKeywords = ["cloth", "felt", "surface", "taibu", "taini",
                              "泥", "布", "green", "baize", "playing"]
         for keyword in clothKeywords {
             if combined.contains(keyword) { return true }
@@ -141,6 +206,16 @@ final class MaterialFactory {
         }
 
         return false
+    }
+
+    /// Normalize an identifier for fuzzy keyword matching:
+    /// lowercased and strips underscores, hyphens, and spaces.
+    /// e.g. "TaiNi" → "taini", "tai_ni" → "taini", "White-Wood" → "whitewood"
+    private static func normalizeIdentifier(_ s: String) -> String {
+        s.lowercased()
+         .replacingOccurrences(of: "_", with: "")
+         .replacingOccurrences(of: "-", with: "")
+         .replacingOccurrences(of: " ", with: "")
     }
 
     /// Sample image pixels to check if the dominant color is green (table cloth).
@@ -191,9 +266,27 @@ final class MaterialFactory {
         return nil
     }
 
+    /// Returns true when a SCNMaterialProperty.contents value represents an actual texture
+    /// (CGImage, UIImage, or URL), as opposed to a plain color or scalar.
+    ///
+    /// Use this instead of a bare `!= nil` check to avoid mistaking a UIColor or Float
+    /// contents value for a baked texture.
+    private static func hasTextureContents(_ contents: Any?) -> Bool {
+        guard let contents else { return false }
+        if contents is UIImage { return true }
+        if contents is URL     { return true }
+        let obj = contents as AnyObject
+        if CFGetTypeID(obj) == CGImage.typeID { return true }
+        return false
+    }
+
     // MARK: - Rail / Wood Material
 
     /// Enhance wood rail materials with low roughness.
+    ///
+    /// Strategy mirrors enhanceClothMaterials:
+    /// - roughness: keep USDZ texture if present; write scalar 0.30 only as fallback.
+    /// - normal: keep USDZ texture if present; install procedural wood grain only as fallback.
     static func enhanceRailMaterials(in tableNode: SCNNode) {
         let qm = RenderQualityManager.shared
         guard qm.isEnabled(.railClearcoat) else { return }
@@ -203,31 +296,76 @@ final class MaterialFactory {
         enumerateMaterials(in: tableNode) { material, nodeName in
             guard isRailMaterial(material, nodeName: nodeName) else { return }
 
-            material.lightingModel = .physicallyBased
-            material.roughness.contents = Float(0.30)
-            material.metalness.contents = Float(0.0)
+            #if DEBUG
+            debugLogMaterialSnapshot(material, nodeName: nodeName, tag: "BEFORE rail enhance")
+            #endif
 
-            material.normal.contents = woodNormal
-            material.normal.intensity = 0.35
-            material.normal.wrapS = .repeat
-            material.normal.wrapT = .repeat
-            material.normal.contentsTransform = SCNMatrix4MakeScale(4, 4, 1)
+            material.lightingModel = .physicallyBased
+
+            // --- roughness ---
+            let roughnessSource: String
+            if !hasTextureContents(material.roughness.contents) {
+                material.roughness.contents = Float(0.30)
+                roughnessSource = "default(0.30)"
+            } else {
+                roughnessSource = "USDZ texture"
+            }
+
+            // --- metalness ---
+            let metalnessSource: String
+            if !hasTextureContents(material.metalness.contents) {
+                material.metalness.contents = Float(0.0)
+                metalnessSource = "default(0.0)"
+            } else {
+                metalnessSource = "USDZ texture"
+            }
+
+            // --- normal ---
+            let normalSource: String
+            if hasTextureContents(material.normal.contents) {
+                // USDZ-sourced normal: leave contents and intensity untouched.
+                normalSource = "USDZ texture"
+            } else {
+                material.normal.contents = woodNormal
+                material.normal.intensity = normalIntensityWoodFallback
+                material.normal.wrapS = .repeat
+                material.normal.wrapT = .repeat
+                material.normal.contentsTransform = SCNMatrix4MakeScale(4, 4, 1)
+                normalSource = "generated(wood grain, intensity=\(normalIntensityWoodFallback))"
+            }
+
+            #if DEBUG
+            debugLogEnhanceSummary(material, nodeName: nodeName,
+                                   normalSource: normalSource,
+                                   roughnessSource: roughnessSource,
+                                   metalnessSource: metalnessSource)
+            #endif
         }
     }
 
     private static func isRailMaterial(_ material: SCNMaterial, nodeName: String?) -> Bool {
-        let nName = (nodeName ?? "").lowercased()
-        let mName = (material.name ?? "").lowercased()
+        let nName = normalizeIdentifier(nodeName ?? "")
+        let mName = normalizeIdentifier(material.name ?? "")
         let combined = nName + " " + mName
 
         if combined.contains("rail") || combined.contains("wood") || combined.contains("frame")
             || combined.contains("mu") || combined.contains("框") || combined.contains("边") {
             return true
         }
+
+        // Color heuristic: warm brownish tone typical of wood grain.
+        // Guard: exclude high-metalness materials (Gold, copp, MG_Gold, etc.) — they share
+        // a similar warm color range but must NOT have their metalness reset to 0.
         if let color = material.diffuse.contents as? UIColor {
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0
             color.getRed(&r, green: &g, blue: &b, alpha: nil)
-            if r > 0.3 && r > b && g < r && g > 0.15 { return true }
+            if r > 0.3 && r > b && g < r && g > 0.15 {
+                // Reject if the material is already configured as a metal
+                let metalVal = material.metalness.contents
+                if let f = metalVal as? Float, f > 0.5 { return false }
+                if let n = metalVal as? NSNumber, n.floatValue > 0.5 { return false }
+                return true
+            }
         }
         return false
     }
@@ -245,8 +383,8 @@ final class MaterialFactory {
     }
 
     private static func isPocketMaterial(_ material: SCNMaterial, nodeName: String?) -> Bool {
-        let nName = (nodeName ?? "").lowercased()
-        let mName = (material.name ?? "").lowercased()
+        let nName = normalizeIdentifier(nodeName ?? "")
+        let mName = normalizeIdentifier(material.name ?? "")
         let combined = nName + " " + mName
         if combined.contains("pocket") || combined.contains("dai") || combined.contains("袋") {
             return true
@@ -266,8 +404,8 @@ final class MaterialFactory {
     static func generateContactShadowTexture(size: Int = 128) -> UIImage {
         let s = size
         let half = Float(s) * 0.5
-        let baseAlpha: Float = 0.74
-        let exponent: Float = 3.0
+        let baseAlpha: Float = 0.62
+        let exponent: Float = 2.2
 
         var pixels = [UInt8](repeating: 0, count: s * s * 4)
         for row in 0..<s {
@@ -357,21 +495,79 @@ final class MaterialFactory {
         return imageFromRGBA(pixels: pixels, width: s, height: s)
     }
 
-    // MARK: - Debug
+    // MARK: - Debug Logging (DEBUG only)
 
-    /// Print all materials found in a node tree (for USDZ inspection).
+#if DEBUG
+    /// Returns a human-readable description of a SCNMaterialProperty.contents value,
+    /// distinguishing between texture types and plain scalars/colors.
+    private static func materialContentsDescription(_ contents: Any?) -> String {
+        guard let contents else { return "nil" }
+        if contents is UIImage  { return "UIImage(texture)" }
+        if contents is URL      { return "URL(texture)" }
+        let obj = contents as AnyObject
+        if CFGetTypeID(obj) == CGImage.typeID { return "CGImage(texture)" }
+        if let color = contents as? UIColor {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            color.getRed(&r, green: &g, blue: &b, alpha: &a)
+            return String(format: "UIColor(r:%.2f g:%.2f b:%.2f)", r, g, b)
+        }
+        if let f = contents as? Float  { return "Float(\(f))" }
+        if let n = contents as? NSNumber { return "NSNumber(\(n))" }
+        return "\(type(of: contents))"
+    }
+
+    /// Print a full channel snapshot for one material before any enhancement is applied.
+    /// Call this at the top of each enhance* closure to capture the raw USDZ state.
+    private static func debugLogMaterialSnapshot(
+        _ material: SCNMaterial,
+        nodeName: String?,
+        tag: String
+    ) {
+        let node = nodeName ?? "-"
+        let mat  = material.name ?? "-"
+        print("[MaterialFactory] 📋 \(tag) node=\(node) material=\(mat)")
+        print("[MaterialFactory]   diffuse   = \(materialContentsDescription(material.diffuse.contents))")
+        print("[MaterialFactory]   normal    = \(materialContentsDescription(material.normal.contents))")
+        print("[MaterialFactory]   roughness = \(materialContentsDescription(material.roughness.contents))")
+        print("[MaterialFactory]   metalness = \(materialContentsDescription(material.metalness.contents))")
+    }
+
+    /// Print the final per-channel decision summary after enhancement is applied.
+    private static func debugLogEnhanceSummary(
+        _ material: SCNMaterial,
+        nodeName: String?,
+        normalSource: String,
+        roughnessSource: String,
+        metalnessSource: String
+    ) {
+        let node = nodeName ?? "-"
+        let mat  = material.name ?? "-"
+        let diff = hasTextureContents(material.diffuse.contents) ? "texture" : materialContentsDescription(material.diffuse.contents)
+        print("[MaterialFactory] ✅ summary node=\(node) material=\(mat)")
+        print("[MaterialFactory]   diffuse   = \(diff)")
+        print("[MaterialFactory]   normal    = \(normalSource)")
+        print("[MaterialFactory]   roughness = \(roughnessSource)")
+        print("[MaterialFactory]   metalness = \(metalnessSource)")
+    }
+
+    /// Print all materials found in a node tree (raw USDZ inspection, no enhancement applied).
     static func debugPrintMaterials(in node: SCNNode, depth: Int = 0) {
         let indent = String(repeating: "  ", count: depth)
         if let geometry = node.geometry {
             for (i, mat) in geometry.materials.enumerated() {
-                let diffuseType = mat.diffuse.contents.map { String(describing: type(of: $0)) } ?? "nil"
-                print("\(indent)[\(node.name ?? "?")] mat[\(i)] name=\(mat.name ?? "?") diffuse=\(diffuseType)")
+                let diffuseDesc = materialContentsDescription(mat.diffuse.contents)
+                let normalDesc  = materialContentsDescription(mat.normal.contents)
+                let roughDesc   = materialContentsDescription(mat.roughness.contents)
+                let metalDesc   = materialContentsDescription(mat.metalness.contents)
+                print("\(indent)[MaterialFactory] 🔍 [\(node.name ?? "?")] mat[\(i)] name=\(mat.name ?? "?")")
+                print("\(indent)  diffuse=\(diffuseDesc)  normal=\(normalDesc)  roughness=\(roughDesc)  metalness=\(metalDesc)")
             }
         }
         for child in node.childNodes {
             debugPrintMaterials(in: child, depth: depth + 1)
         }
     }
+#endif
 
     // MARK: - Noise Helpers
 

@@ -12,6 +12,9 @@ import UIKit
 // MARK: - Billiard Scene
 /// 台球场景管理器
 class BilliardScene: SCNScene {
+    private static let contactShadowYOffset: Float = 0.003
+    private static let contactShadowRadiusMultiplier: Float = 0.48
+    private static let contactShadowRenderingOrder: Int = 20
     
     // MARK: - Properties
     
@@ -248,7 +251,9 @@ class BilliardScene: SCNScene {
         rootNode.addChildNode(tableNode)
 
         // 4. 调试：打印 USDZ 材质信息（首次运行时查看控制台）
+        #if DEBUG
         MaterialFactory.debugPrintMaterials(in: tableNode)
+        #endif
 
         // 5. 增强台面 / 木边 / 袋口材质
         MaterialFactory.enhanceClothMaterials(in: tableNode)
@@ -588,37 +593,59 @@ class BilliardScene: SCNScene {
         }
     }
     
-    /// 摄影棚式三灯系统：Key + IBL + Rim
+    /// 四灯系统：Key + Fill + Rim + IBL
     private func setupLights() {
         let flags = RenderQualityManager.shared.featureFlags
 
         // ── 1. Key Light：主顶光（体积 + 阴影 + 高光） ──
-        // 6500K 中性白，pitch ~-82°，唯一投影光源
+        // 5800K 中性白，pitch -68°（模拟真实灯箱斜照角度），yaw 18°（避免对称高光）
         let keyLight = SCNLight()
         keyLight.type = .directional
-        keyLight.intensity = 750
-        keyLight.color = UIColor(red: 1.0, green: 0.99, blue: 0.96, alpha: 1.0)
+        keyLight.intensity = 820
+        keyLight.temperature = 5800
         keyLight.castsShadow = true
         keyLight.shadowRadius = flags.shadowRadius
         keyLight.shadowSampleCount = flags.shadowSampleCount
-        keyLight.shadowColor = UIColor(white: 0.0, alpha: 0.22)
+        keyLight.shadowColor = UIColor(white: 0.0, alpha: 0.35)
         keyLight.shadowMapSize = CGSize(width: flags.shadowMapSize, height: flags.shadowMapSize)
-        keyLight.shadowBias = 0.02
+        keyLight.shadowBias = 0.008
         keyLight.shadowMode = flags.shadowMode
-        keyLight.orthographicScale = 3.0
+        keyLight.orthographicScale = 1.7
 
         let keyLightNode = SCNNode()
         keyLightNode.light = keyLight
         keyLightNode.position = SCNVector3(0, 4, 0)
-        keyLightNode.eulerAngles = SCNVector3(-82.0 * Float.pi / 180.0, 0, 0)
+        keyLightNode.eulerAngles = SCNVector3(
+            -68.0 * Float.pi / 180.0,
+            18.0 * Float.pi / 180.0,
+            0
+        )
         rootNode.addChildNode(keyLightNode)
         lightNodes.append(keyLightNode)
 
-        // ── 2. Rim Light：弱侧分离光（轮廓张力） ──
-        // 5500K 略暖，从侧后方打入，不投影
+        // ── 2. Fill Light：弱补光（防死黑，补亮袋口和木边） ──
+        // 6800K 略冷，从左前方打入，无投影
+        let fillLight = SCNLight()
+        fillLight.type = .directional
+        fillLight.intensity = 50
+        fillLight.temperature = 6800
+        fillLight.castsShadow = false
+
+        let fillLightNode = SCNNode()
+        fillLightNode.light = fillLight
+        fillLightNode.eulerAngles = SCNVector3(
+            -30.0 * Float.pi / 180.0,
+            -40.0 * Float.pi / 180.0,
+            0
+        )
+        rootNode.addChildNode(fillLightNode)
+        lightNodes.append(fillLightNode)
+
+        // ── 3. Rim Light：弱侧分离光（轮廓张力） ──
+        // 略暖，从右后上方打入，不投影
         let rimLight = SCNLight()
         rimLight.type = .directional
-        rimLight.intensity = 150
+        rimLight.intensity = 120
         rimLight.color = UIColor(red: 1.0, green: 0.96, blue: 0.90, alpha: 1.0)
         rimLight.castsShadow = false
 
@@ -1157,7 +1184,7 @@ class BilliardScene: SCNScene {
             newInitial[key] = pos
             if let shadow = shadowNodes[key] {
                 shadow.isHidden = false
-                shadow.position = SCNVector3(pos.x, TablePhysics.height + 0.002, pos.z)
+                shadow.position = SCNVector3(pos.x, TablePhysics.height + Self.contactShadowYOffset, pos.z)
             }
         }
         for num in 1...15 where !usedTargetNumbers.contains(num) {
@@ -1205,7 +1232,7 @@ class BilliardScene: SCNScene {
         
         if let shadow = shadowNodes["cueBall"] {
             shadow.isHidden = false
-            shadow.position = SCNVector3(defaultPosition.x, TablePhysics.height + 0.002, defaultPosition.z)
+            shadow.position = SCNVector3(defaultPosition.x, TablePhysics.height + Self.contactShadowYOffset, defaultPosition.z)
         }
         
         alignVisualCenter(of: ball, to: defaultPosition)
@@ -1602,7 +1629,7 @@ class BilliardScene: SCNScene {
     /// 每帧调用：约束所有球贴合台面（消除 Y 方向的任何漂移或弹跳）
     func constrainBallsToSurface() {
         let surfaceY = TablePhysics.height + BallPhysics.radius
-        let shadowY = TablePhysics.height + 0.002
+        let shadowY = TablePhysics.height + Self.contactShadowYOffset
         
         func constrain(_ ball: SCNNode) {
             guard ball.parent != nil else { return }  // 已进袋的球跳过
@@ -1635,7 +1662,7 @@ class BilliardScene: SCNScene {
     
     /// 每帧更新阴影位置（兼容 SCNAction 播放中的 presentation 位置）
     func updateShadowPositions() {
-        let shadowY = TablePhysics.height + 0.002
+        let shadowY = TablePhysics.height + Self.contactShadowYOffset
         for (name, shadow) in shadowNodes {
             guard let ball = allBallNodes[name], ball.parent != nil else { continue }
             let pos = ball.presentation.position
@@ -1844,21 +1871,24 @@ class BilliardScene: SCNScene {
     private func attachShadow(to ball: SCNNode) {
         guard let name = ball.name, shadowNodes[name] == nil else { return }
 
-        let radius = CGFloat(BallPhysics.radius * 2.2)
+        let radius = CGFloat(BallPhysics.radius * Self.contactShadowRadiusMultiplier)
         let shadowPlane = SCNPlane(width: radius * 2, height: radius * 2)
         let material = SCNMaterial()
         material.diffuse.contents = MaterialFactory.generateContactShadowTexture(size: 128)
         material.isDoubleSided = true
         material.writesToDepthBuffer = false
+        material.readsFromDepthBuffer = true
         material.lightingModel = .constant
+        material.transparency = 0.52
+        material.blendMode = .multiply
         material.transparencyMode = .aOne
         shadowPlane.materials = [material]
 
         let shadowNode = SCNNode(geometry: shadowPlane)
         shadowNode.name = "\(name)_shadow"
         shadowNode.eulerAngles = SCNVector3(-Float.pi / 2, 0, 0)
-        shadowNode.position = SCNVector3(ball.position.x, TablePhysics.height + 0.002, ball.position.z)
-        shadowNode.renderingOrder = -1
+        shadowNode.position = SCNVector3(ball.position.x, TablePhysics.height + Self.contactShadowYOffset, ball.position.z)
+        shadowNode.renderingOrder = Self.contactShadowRenderingOrder
         rootNode.addChildNode(shadowNode)
         shadowNodes[name] = shadowNode
     }
@@ -1908,7 +1938,7 @@ class BilliardScene: SCNScene {
         
         cueBall.position = targetPos
         if let shadow = shadowNodes["cueBall"] {
-            shadow.position = SCNVector3(targetPos.x, TablePhysics.height + 0.002, targetPos.z)
+            shadow.position = SCNVector3(targetPos.x, TablePhysics.height + Self.contactShadowYOffset, targetPos.z)
         }
         return true
     }
@@ -2166,7 +2196,7 @@ class BilliardScene: SCNScene {
         for (name, shadow) in shadowNodes {
             shadow.isHidden = false
             if let ball = allBallNodes[name] {
-                shadow.position = SCNVector3(ball.position.x, TablePhysics.height + 0.002, ball.position.z)
+                shadow.position = SCNVector3(ball.position.x, TablePhysics.height + Self.contactShadowYOffset, ball.position.z)
             }
         }
         

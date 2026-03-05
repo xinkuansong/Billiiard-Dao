@@ -47,7 +47,7 @@ final class EnvironmentLightingManager {
         if flags.hdriEnabled,
            let hdrURL = Bundle.main.url(forResource: "billiard_hall", withExtension: "hdr") {
             scene.lightingEnvironment.contents = hdrURL
-            scene.lightingEnvironment.intensity = 0.88
+            scene.lightingEnvironment.intensity = iblIntensity(for: tier)
             scene.lightingEnvironment.contentsTransform = SCNMatrix4MakeRotation(.pi * 0.25, 0, 1, 0)
             let bg = cachedBackground(for: tier, size: 256)
             scene.background.contents = bg
@@ -56,8 +56,19 @@ final class EnvironmentLightingManager {
 
         let mapSize = max(256, flags.environmentMapSize)
         scene.lightingEnvironment.contents = cachedIBL(for: tier, size: mapSize)
-        scene.lightingEnvironment.intensity = 0.88
+        scene.lightingEnvironment.intensity = iblIntensity(for: tier)
         scene.background.contents = cachedBackground(for: tier, size: mapSize)
+    }
+
+    // MARK: - IBL Intensity per Tier
+
+    /// Per-tier IBL intensity: low=0.95, medium=1.60, high=1.80
+    private static func iblIntensity(for tier: RenderTier) -> CGFloat {
+        switch tier {
+        case .low:    return 0.95
+        case .medium: return 1.60
+        case .high:   return 1.80
+        }
     }
 
     private static func cachedIBL(for tier: RenderTier, size: Int) -> [UIImage] {
@@ -93,13 +104,22 @@ final class EnvironmentLightingManager {
 
     enum EnvironmentPreset { case training, dark, bright }
 
+    // MARK: - Debug IBL Mode (toggle for visual verification)
+
+    enum DebugIBLMode {
+        case normal
+        case showTopFaceOnly   // wall/floor → mid-gray, isolate ceiling contribution
+        case exaggerated       // lamp intensity ×1.5 for verifying strip shape
+    }
+    private static var debugIBLMode: DebugIBLMode = .normal
+
     // MARK: - Color Anchors (B > G > R, cold consistent)
 
-    private static let C0 = SIMD3<Float>(0.028, 0.036, 0.055) // ceiling / top
-    private static let C1 = SIMD3<Float>(0.050, 0.064, 0.090) // wall mid-peak
-    private static let C2 = SIMD3<Float>(0.040, 0.052, 0.076) // horizon band
-    private static let F0 = SIMD3<Float>(0.032, 0.042, 0.062) // floor base
-    private static let F1 = SIMD3<Float>(0.026, 0.034, 0.050) // floor near camera
+    private static let C0 = SIMD3<Float>(0.030, 0.040, 0.060) // ceiling / top
+    private static let C1 = SIMD3<Float>(0.050, 0.060, 0.080) // wall mid-peak
+    private static let C2 = SIMD3<Float>(0.040, 0.050, 0.070) // horizon band
+    private static let F0 = SIMD3<Float>(0.032, 0.034, 0.044) // floor base
+    private static let F1 = SIMD3<Float>(0.030, 0.030, 0.040) // floor near camera
 
     private static let y0: Float = 1.00
     private static let y1: Float = 0.70
@@ -199,18 +219,46 @@ final class EnvironmentLightingManager {
         return imageFromRGBA(pixels: pixels, width: s, height: s)
     }
 
+    // MARK: - IBL Helpers (SDF + smoothstep)
+
+    /// Standard smoothstep (Hermite interpolation with clamped t).
+    private static func smoothstep(_ edge0: Float, _ edge1: Float, _ x: Float) -> Float {
+        let t = max(0, min(1, (x - edge0) / (edge1 - edge0)))
+        return t * t * (3 - 2 * t)
+    }
+
+    /// Signed distance from point (px, py) to a rounded-rectangle centered at (cx, cy)
+    /// with half-extents (hw, hh) and corner radius r.
+    /// Returns negative inside, 0 on boundary, positive outside.
+    private static func roundedRectSDF(px: Float, py: Float,
+                                       cx: Float, cy: Float,
+                                       hw: Float, hh: Float,
+                                       r: Float) -> Float {
+        let dx = max(abs(px - cx) - hw + r, 0)
+        let dy = max(abs(py - cy) - hh + r, 0)
+        return sqrt(dx * dx + dy * dy) - r
+    }
+
     // MARK: - IBL Cube Map (neutral, clean reflections)
 
     static func generateIBLCubeMap(size: Int, brightness: Float = 1.0) -> [UIImage] {
         let s = size
         let b = brightness
 
-        let wallTop = SIMD3<Float>(0.15, 0.16, 0.18) * b
-        let wallBot = SIMD3<Float>(0.07, 0.07, 0.08) * b
-
-        let wall = renderIBLWall(size: s, top: wallTop, bot: wallBot)
         let ceiling = renderIBLCeiling(size: s, b: b)
-        let floor = renderSolidFace(size: s, color: SIMD3<Float>(0.045, 0.052, 0.06) * b)
+
+        let wall: UIImage
+        let floor: UIImage
+        if debugIBLMode == .showTopFaceOnly {
+            let debugGray = SIMD3<Float>(0.30, 0.30, 0.30) * b
+            wall  = renderSolidFace(size: s, color: debugGray)
+            floor = renderSolidFace(size: s, color: debugGray)
+        } else {
+            let wallTop = SIMD3<Float>(0.20, 0.21, 0.24) * b
+            let wallBot = SIMD3<Float>(0.10, 0.10, 0.12) * b
+            wall  = renderIBLWall(size: s, top: wallTop, bot: wallBot)
+            floor = renderSolidFace(size: s, color: SIMD3<Float>(0.06, 0.07, 0.08) * b)
+        }
 
         return [wall, wall, ceiling, floor, wall, wall]
     }
@@ -234,37 +282,101 @@ final class EnvironmentLightingManager {
         return imageFromRGBA(pixels: pixels, width: s, height: s)
     }
 
+    /// Triple-strip softbox ceiling: 3 capsule lamps + diffusion halos + ceiling bounce.
+    /// All geometry computed in UV space [0,1]. Parameters extracted as locals for easy tuning.
     private static func renderIBLCeiling(size s: Int, b: Float) -> UIImage {
-        let base = SIMD3<Float>(0.06, 0.065, 0.08) * b
+
+        // ── Tunable parameters (UV space) ──────────────────────────────
+        let ceilingBase   = SIMD3<Float>(0.10, 0.11, 0.13) * b
+
+        // Lamp strips (3 capsules)
+        let lampW: Float  = 0.72
+        let lampH: Float  = 0.10
+        let lampR: Float  = lampH * 0.5
+        let lampOffsets: [Float] = [-0.12, 0.0, 0.12]  // y-offsets from center
+        let lampColor     = SIMD3<Float>(0.86, 0.84, 0.80) * b
+
+        // Core hot-line inside each lamp
+        let coreH: Float  = lampH * 0.35
+        let coreR: Float  = coreH * 0.5
+        let coreColor     = SIMD3<Float>(0.98, 0.96, 0.92) * b
+
+        // Smoothstep feather width (UV units)
+        let feather: Float = 0.015
+
+        // Diffusion halo around each lamp
+        let haloWScale: Float = 1.10
+        let haloHScale: Float = 1.80
+        let haloW: Float  = lampW * haloWScale
+        let haloH: Float  = lampH * haloHScale
+        let haloR: Float  = min(haloW, haloH) * 0.5
+        let haloFeather: Float = 0.04
+        let haloIntensity: Float = 0.14
+
+        // Ceiling bounce (large soft ellipse)
+        let bounceRx: Float = 0.55
+        let bounceRy: Float = 0.40
+        let bounceIntensity: Float = 0.08
+        let bounceColor   = lerp3(ceilingBase, lampColor, 0.3)
+
+        // Debug: exaggerated mode multiplier
+        let exaggerate: Float = (debugIBLMode == .exaggerated) ? 1.5 : 1.0
+
+        // ── Pixel generation ───────────────────────────────────────────
         var pixels = [UInt8](repeating: 0, count: s * s * 4)
-
-        // Base fill
-        let br = UInt8(clamping: Int(min(base.x, 1.0) * 255))
-        let bg = UInt8(clamping: Int(min(base.y, 1.0) * 255))
-        let bb = UInt8(clamping: Int(min(base.z, 1.0) * 255))
-        for i in 0..<(s * s) {
-            let idx = i * 4
-            pixels[idx] = br; pixels[idx+1] = bg; pixels[idx+2] = bb; pixels[idx+3] = 255
-        }
-
-        // Lamp ellipse — smaller & dimmer to avoid broad gray film on balls
-        let cx = Float(s) * 0.5, cy = Float(s) * 0.5
-        let rx = Float(s) * 0.18, ry = Float(s) * 0.12
-        let lamp = SIMD3<Float>(min(1.0, 0.60 * b), min(1.0, 0.58 * b), min(1.0, 0.55 * b))
-        let core = SIMD3<Float>(min(1.0, 0.72 * b), min(1.0, 0.70 * b), min(1.0, 0.68 * b))
+        let invS = 1.0 / Float(s)
 
         for row in 0..<s {
+            let v = (Float(row) + 0.5) * invS   // UV y ∈ [0,1]
             for col in 0..<s {
-                let dx = (Float(col) - cx) / rx
-                let dy = (Float(row) - cy) / ry
-                let d2 = dx * dx + dy * dy
-                if d2 < 1.0 {
-                    let idx = (row * s + col) * 4
-                    let c = d2 < 0.3 ? core : lamp
-                    pixels[idx] = UInt8(clamping: Int(min(c.x, 1.0) * 255))
-                    pixels[idx+1] = UInt8(clamping: Int(min(c.y, 1.0) * 255))
-                    pixels[idx+2] = UInt8(clamping: Int(min(c.z, 1.0) * 255))
+                let u = (Float(col) + 0.5) * invS   // UV x ∈ [0,1]
+
+                // Layer 0: ceiling base
+                var color = ceilingBase
+
+                // Layer 1: ceiling bounce (low-frequency warm uplighting)
+                let bdu = (u - 0.5) / bounceRx
+                let bdv = (v - 0.5) / bounceRy
+                let bDist = sqrt(bdu * bdu + bdv * bdv)
+                let bAlpha = 1.0 - smoothstep(0.0, 1.0, bDist)
+                color = color + bounceColor * (bAlpha * bounceIntensity)
+
+                // Layer 2 + 3: per-lamp halo, body, and core
+                for offset in lampOffsets {
+                    let cy: Float = 0.5 + offset
+
+                    // Halo (diffusion envelope, wider feather)
+                    let haloDist = roundedRectSDF(px: u, py: v,
+                                                  cx: 0.5, cy: cy,
+                                                  hw: haloW * 0.5, hh: haloH * 0.5,
+                                                  r: haloR)
+                    let haloAlpha = 1.0 - smoothstep(0, haloFeather, haloDist)
+                    color = color + lampColor * (haloAlpha * haloIntensity * exaggerate)
+
+                    // Lamp body
+                    let lampDist = roundedRectSDF(px: u, py: v,
+                                                  cx: 0.5, cy: cy,
+                                                  hw: lampW * 0.5, hh: lampH * 0.5,
+                                                  r: lampR)
+                    let lampAlpha = 1.0 - smoothstep(0, feather, lampDist)
+                    color = color + lampColor * (lampAlpha * exaggerate)
+
+                    // Core strip (bright tube center)
+                    let coreDist = roundedRectSDF(px: u, py: v,
+                                                  cx: 0.5, cy: cy,
+                                                  hw: lampW * 0.5, hh: coreH * 0.5,
+                                                  r: coreR)
+                    let coreAlpha = 1.0 - smoothstep(0, feather, coreDist)
+                    let coreAdd = coreColor - lampColor
+                    color = color + coreAdd * (coreAlpha * exaggerate)
                 }
+
+                // Clamp & write
+                let idx = (row * s + col) * 4
+                pixels[idx]     = UInt8(clamping: Int(min(color.x, 1.0) * 255))
+                pixels[idx + 1] = UInt8(clamping: Int(min(color.y, 1.0) * 255))
+                pixels[idx + 2] = UInt8(clamping: Int(min(color.z, 1.0) * 255))
+                pixels[idx + 3] = 255
             }
         }
 
