@@ -101,7 +101,12 @@ struct CollisionDetector {
         let d = 2.0 * dvDotDp
         let e = dpDotDp - 4.0 * R * R
         
-        // Solve quartic equation
+        // Always use the full quartic solver — no degradation to lower-order equations.
+        // Ref: pooltool solve.py ball_ball_collision_time never degrades; for
+        // stationary/spinning balls the coefficients are set to zero analytically,
+        // so the quartic handles degenerate cases correctly without special-casing.
+        // Degrading to quadratic/cubic drops the b·t³ term, which causes missed roots
+        // for rolling-rolling pairs at low speed (postEvolveOverlap observed).
         let roots = QuarticSolver.solveQuartic(a: a, b: b, c: c, d: d, e: e)
         
         // Find smallest positive root within maxTime
@@ -233,8 +238,8 @@ struct CollisionDetector {
     /// (outer contact). Roots are filtered by:
     /// 1. Approach direction — ball must be moving toward the surface (radial distance decreasing)
     /// 2. Angular range — contact point must lie on the finite arc
-    /// 3. Pocket exclusion — contact point must not fall inside any pocket region
-    /// 4. Contact verification — numerical distance must match D within tolerance
+    ///
+    /// Keep filtering minimal and deterministic to match pooltool quartic behavior.
     static func ballCircularCushionTime(
         p: SCNVector3,
         v: SCNVector3,
@@ -244,6 +249,9 @@ struct CollisionDetector {
         maxTime: Double,
         pockets: [Pocket] = []
     ) -> Float? {
+        // Kept for call-site compatibility; pocket filtering is handled by event ordering,
+        // not geometry-side suppression.
+        _ = pockets
         let D = Double(arc.radius + R)
         
         let dpx = Double(p.x - arc.center.x)
@@ -283,27 +291,6 @@ struct CollisionDetector {
             var angle = Float(atan2(bz, bx))
             if angle < 0 { angle += Float.pi * 2 }
             guard arc.isAngleInRange(angle) else { continue }
-            
-            // 3) Contact distance verification (filter numerical noise)
-            let distSq = bx * bx + bz * bz
-            let relError = abs(distSq - D * D) / (D * D)
-            guard relError < 0.05 else { continue }
-            
-            // 4) Pocket exclusion: skip if contact point falls inside a pocket region
-            let contactWorldX = Float(bx) + arc.center.x
-            let contactWorldZ = Float(bz) + arc.center.z
-            let contactPos = SCNVector3(contactWorldX, p.y, contactWorldZ)
-            var nearPocket = false
-            for pocket in pockets {
-                let dx = contactPos.x - pocket.center.x
-                let dz = contactPos.z - pocket.center.z
-                let dist = sqrtf(dx * dx + dz * dz)
-                if dist < pocket.radius + R * 0.5 {
-                    nearPocket = true
-                    break
-                }
-            }
-            guard !nearPocket else { continue }
             
             if best == nil || t < best! {
                 best = t

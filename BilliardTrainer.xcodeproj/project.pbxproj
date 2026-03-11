@@ -60,6 +60,7 @@
 		UTIL001 /* PhysicsConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL001 /* PhysicsConstants.swift */; };
 		UTIL002 /* Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL002 /* Extensions.swift */; };
 		UTIL003 /* SCNVector3+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL003 /* SCNVector3+Extensions.swift */; };
+		UTIL004 /* PerformanceProfiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC_UTIL004 /* PerformanceProfiler.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -129,6 +130,7 @@
 		SRC_UTIL001 /* PhysicsConstants.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhysicsConstants.swift; sourceTree = "<group>"; };
 		SRC_UTIL002 /* Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extensions.swift; sourceTree = "<group>"; };
 		SRC_UTIL003 /* SCNVector3+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SCNVector3+Extensions.swift"; sourceTree = "<group>"; };
+		SRC_UTIL004 /* PerformanceProfiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceProfiler.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -484,6 +486,7 @@
 			children = (
 				EXTENSIONS_GROUP /* Extensions */,
 				CONSTANTS_GROUP /* Constants */,
+				SRC_UTIL004 /* PerformanceProfiler.swift */,
 			);
 			path = Utilities;
 			sourceTree = "<group>";
@@ -639,6 +642,7 @@
 				UTIL001 /* PhysicsConstants.swift in Sources */,
 				UTIL002 /* Extensions.swift in Sources */,
 				UTIL003 /* SCNVector3+Extensions.swift in Sources */,
+				UTIL004 /* PerformanceProfiler.swift in Sources */,
 				SCENE003 /* TableModelLoader.swift in Sources */,
 				SCENE004 /* CueStick.swift in Sources */,
 				SCENE005 /* TableGeometry.swift in Sources */,

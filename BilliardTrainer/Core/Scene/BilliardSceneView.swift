@@ -113,6 +113,8 @@ struct BilliardSceneView: UIViewRepresentable {
         private var lastTimestamp: CFTimeInterval?
         private var lastAimLineUpdateTimestamp: CFTimeInterval = 0
         private var lastAppliedRenderTier: RenderTier?
+        /// Metal pipeline warm-up 是否已触发（只需在第1帧执行一次）
+        private var metalWarmupDone = false
         
         private enum PanAxisLock {
             case undecided
@@ -137,6 +139,7 @@ struct BilliardSceneView: UIViewRepresentable {
         func startRenderLoop(for view: SCNView) {
             scnView = view
             lastAppliedRenderTier = nil
+            metalWarmupDone = false
             applyRenderQualityIfNeeded(force: true)
             displayLink = CADisplayLink(target: self, selector: #selector(renderUpdate))
             displayLink?.add(to: .main, forMode: .common)
@@ -167,6 +170,12 @@ struct BilliardSceneView: UIViewRepresentable {
         
         @objc private func renderUpdate() {
             let now = displayLink?.timestamp ?? CACurrentMediaTime()
+
+            // 第1帧触发 Metal shader pipeline warm-up，让 aim line 和 trajectory dot 的 shader 提前编译
+            if !metalWarmupDone {
+                metalWarmupDone = true
+                viewModel.scene.triggerMetalPipelineWarmup()
+            }
             
             // P1-1: 异步物理模拟完成后重置时间戳，避免模拟耗时污染 FPS 采样
             if viewModel.needsTimestampReset {
@@ -245,16 +254,19 @@ struct BilliardSceneView: UIViewRepresentable {
                     pullBack: 0,
                     ballPositions: viewModel.scene.targetBallPositions()
                 )
+                PerformanceProfiler.begin(ProfilerLabel.cueStickUpdate)
                 viewModel.cueStick?.update(
                     cueBallPosition: cueCenter,
                     aimDirection: viewModel.aimDirection,
                     pullBack: 0,
                     elevation: elevation
                 )
+                PerformanceProfiler.end(ProfilerLabel.cueStickUpdate)
             }
             
             if viewModel.gameState == .aiming && !isTopDown {
                 if now - lastAimLineUpdateTimestamp >= (1.0 / 45.0) {
+                    PerformanceProfiler.begin(ProfilerLabel.aimLineUpdate)
                     let aimLineLen = viewModel.scene.calculateAimLineLength(
                         from: cueCenter,
                         direction: viewModel.aimDirection
@@ -264,9 +276,12 @@ struct BilliardSceneView: UIViewRepresentable {
                         direction: viewModel.aimDirection,
                         length: aimLineLen
                     )
+                    PerformanceProfiler.end(ProfilerLabel.aimLineUpdate)
                     lastAimLineUpdateTimestamp = now
                 }
+                PerformanceProfiler.begin(ProfilerLabel.trajectoryPreview)
                 viewModel.updateTrajectoryPreview(minInterval: 1.0 / 30.0)
+                PerformanceProfiler.end(ProfilerLabel.trajectoryPreview)
             }
         }
         
@@ -793,6 +808,10 @@ class BilliardSceneViewModel: ObservableObject {
         }
         lastBallsStoppedWallClock = now
         
+        // 打印本轮完整性能报告
+        PerformanceProfiler.printReport(tag: "Shot")
+        PerformanceProfiler.reset()
+        
         // 规则判定
         let result = EightBallRules.isLegalShot(events: shotEvents, currentGroup: currentGroup)
         lastShotLegal = result.legal
@@ -1201,6 +1220,7 @@ class BilliardSceneViewModel: ObservableObject {
         )
         
         // 2. 后台预计算物理模拟（在球杆回拉期间并行执行）
+        PerformanceProfiler.begin(ProfilerLabel.buildEngine)
         let engine = EventDrivenEngine(tableGeometry: scene.tableGeometry)
         let cueBallState = BallState(
             position: cueCenter,
@@ -1226,6 +1246,7 @@ class BilliardSceneViewModel: ObservableObject {
             targetCount += 1
             if sampledTargetCenters.count < 3 { sampledTargetCenters.append(center) }
         }
+        PerformanceProfiler.end(ProfilerLabel.buildEngine)
         
         if let nearest = scene.targetBallNodes
             .map({ scene.visualCenter(of: $0) })
@@ -1242,7 +1263,7 @@ class BilliardSceneViewModel: ObservableObject {
         scene.cameraStateMachine.saveAimContext(aimDirection: aimDirection, zoom: scene.currentCameraZoom)
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            engine.simulate(maxEvents: 500, maxTime: 15.0)
+            engine.simulate(maxEvents: 1000, maxTime: 15.0)
             
             let firstBallBall = engine.resolvedEvents.first {
                 if case .ballBall = $0 { return true }
@@ -1327,11 +1348,13 @@ class BilliardSceneViewModel: ObservableObject {
     
     /// 将预计算的物理模拟结果应用到回放系统
     private func applySimulationResult(_ result: PrecomputedSimulation) {
+        PerformanceProfiler.begin(ProfilerLabel.applyResult)
         extractGameEvents(from: result.engine)
         lastShotRecorder = result.recorder
         startTrajectoryPlayback(recorder: result.recorder)
         pendingObservationContactTime = result.collisionTime
         needsTimestampReset = true
+        PerformanceProfiler.end(ProfilerLabel.applyResult)
     }
     
     /// 从 EventDrivenEngine 提取游戏事件
@@ -1390,9 +1413,15 @@ class BilliardSceneViewModel: ObservableObject {
         }
         allBallNodes.append(contentsOf: scene.targetBallNodes)
         
+        PerformanceProfiler.begin(ProfilerLabel.playbackFrame)
         for ballNode in allBallNodes {
             guard let name = ballNode.name else { continue }
-            guard let state = playback.stateAt(ballName: name, time: elapsed) else { continue }
+            PerformanceProfiler.begin(ProfilerLabel.stateAt)
+            guard let state = playback.stateAt(ballName: name, time: elapsed) else {
+                PerformanceProfiler.end(ProfilerLabel.stateAt)
+                continue
+            }
+            PerformanceProfiler.end(ProfilerLabel.stateAt)
             
             ballNode.position = state.position
             
@@ -1426,6 +1455,7 @@ class BilliardSceneViewModel: ObservableObject {
                 }
             }
         }
+        PerformanceProfiler.end(ProfilerLabel.playbackFrame)
         
         // 回放完成
         if playback.isComplete(at: elapsed) {

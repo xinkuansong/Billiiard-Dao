@@ -78,8 +78,30 @@ struct QuarticSolver {
             return removeDuplicates(roots.sorted(), tolerance: 1e-8)
         }
         
-        // Find a real positive root u of the resolvent cubic (u = alpha^2)
-        guard let u = cubicRoots.first(where: { $0 > 1e-14 }) else {
+        // Find a real positive root u of the resolvent cubic (u = alpha^2).
+        // We need alpha = sqrt(u) to be large enough that beta and gamma (which contain
+        // q / (2*alpha)) are numerically stable. Choosing the SMALLEST positive u can
+        // make alpha ≈ 0 and cause catastrophic cancellation when q ≠ 0.
+        // Strategy: prefer the largest positive root so alpha is well-separated from 0.
+        let positiveRoots = cubicRoots.filter { $0 > 1e-14 }
+        guard !positiveRoots.isEmpty else {
+            return []
+        }
+        // Pick the root that maximises alpha while keeping beta and gamma real.
+        // Try each candidate from largest to smallest and use the first that yields
+        // finite beta and gamma.
+        var chosenU: Double? = nil
+        for candidate in positiveRoots.reversed() {   // reversed() gives largest first
+            let alphaCand = sqrt(candidate)
+            guard alphaCand > 1e-10 else { continue }
+            let betaCand  = (p + candidate) / 2.0 - q / (2.0 * alphaCand)
+            let gammaCand = (p + candidate) / 2.0 + q / (2.0 * alphaCand)
+            if betaCand.isFinite && gammaCand.isFinite {
+                chosenU = candidate
+                break
+            }
+        }
+        guard let u = chosenU else {
             return []
         }
         
@@ -116,8 +138,18 @@ struct QuarticSolver {
         return removeDuplicates(roots.sorted(), tolerance: 1e-8)
     }
     
-    // MARK: - Helper Methods
-    
+    // MARK: - Helper Methods (internal use + exposed for degenerate-case callers)
+
+    /// Solve quadratic equation: ax^2 + bx + c = 0
+    static func solveQuadraticPublic(a: Double, b: Double, c: Double) -> [Double] {
+        return solveQuadratic(a: a, b: b, c: c)
+    }
+
+    /// Solve cubic equation: ax^3 + bx^2 + cx + d = 0
+    static func solveCubicPublic(a: Double, b: Double, c: Double, d: Double) -> [Double] {
+        return solveCubic(a: a, b: b, c: c, d: d)
+    }
+
     /// Solve quadratic equation: ax^2 + bx + c = 0
     private static func solveQuadratic(a: Double, b: Double, c: Double) -> [Double] {
         if abs(a) < 1e-12 {
@@ -193,40 +225,46 @@ struct QuarticSolver {
     
     /// Newton-Raphson polishing: refine an approximate root of ax^4+bx^3+cx^2+dx+e
     /// Returns nil if the root diverges or is not actually near a real root.
-    private static func refineRoot(a: Double, b: Double, c: Double, d: Double, e: Double, x0: Double, maxIter: Int = 8) -> Double? {
+    private static func refineRoot(a: Double, b: Double, c: Double, d: Double, e: Double, x0: Double, maxIter: Int = 12) -> Double? {
         var x = x0
+        var bestX = x0
+        var bestResidual = abs(((((a * x + b) * x + c) * x + d) * x + e))
+
         for _ in 0..<maxIter {
             let f  = ((((a * x + b) * x + c) * x + d) * x + e)
             let df = (((4 * a * x + 3 * b) * x + 2 * c) * x + d)
             if abs(df) < 1e-30 { break }
             let dx = f / df
             x -= dx
+            guard x.isFinite && !x.isNaN else { break }
+            let res = abs(((((a * x + b) * x + c) * x + d) * x + e))
+            if res < bestResidual {
+                bestResidual = res
+                bestX = x
+            }
             if abs(dx) < 1e-14 { break }
         }
-        guard x.isFinite && !x.isNaN else { return nil }
-        let residual = abs(((((a * x + b) * x + c) * x + d) * x + e))
-        // Use max of individual term magnitudes at x as scale.
-        // This correctly handles polynomials with large roots where catastrophic
-        // cancellation makes the coefficient-sum scale far too small.
-        // Ref: standard relative residual for polynomial evaluation at large x.
-        let termA = abs(a * x * x * x * x)
-        let termB = abs(b * x * x * x)
-        let termC = abs(c * x * x)
-        let termD = abs(d * x)
+        guard bestX.isFinite && !bestX.isNaN else { return nil }
+
+        // Relative residual check: scale by the largest individual term at bestX.
+        // For large roots (t >> 1s) the polynomial terms are large, so a fixed
+        // absolute tolerance would incorrectly reject valid roots. Using a relative
+        // tolerance of 1e-4 (vs the previous 1e-6) keeps large-t roots while still
+        // filtering genuine non-roots where residual/scale >> 1e-4.
+        let xv = bestX
+        let termA = abs(a * xv * xv * xv * xv)
+        let termB = abs(b * xv * xv * xv)
+        let termC = abs(c * xv * xv)
+        let termD = abs(d * xv)
         let termE = abs(e)
-        let scale: Double
         let maxTerm = max(termA.isFinite ? termA : 0,
                          termB.isFinite ? termB : 0,
                          termC.isFinite ? termC : 0,
                          termD.isFinite ? termD : 0,
                          termE)
-        if maxTerm > 0 {
-            scale = max(1.0, maxTerm)
-        } else {
-            scale = max(1.0, abs(a) + abs(b) + abs(c) + abs(d) + abs(e))
-        }
-        if residual / scale > 1e-6 { return nil }
-        return x
+        let scale = max(1.0, maxTerm.isFinite ? maxTerm : 0)
+        if bestResidual / scale > 1e-4 { return nil }
+        return bestX
     }
     
     /// Remove duplicate roots within a tolerance

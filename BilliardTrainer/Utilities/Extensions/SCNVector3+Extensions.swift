@@ -65,4 +65,11 @@ extension SCNVector3 {
         let sinA = sinf(angle)
         return SCNVector3(x * cosA - z * sinA, y, x * sinA + z * cosA)
     }
+    
+    /// XZ 平面距离（忽略 Y）
+    func distanceXZ(to other: SCNVector3) -> Float {
+        let dx = x - other.x
+        let dz = z - other.z
+        return sqrtf(dx * dx + dz * dz)
+    }
 }

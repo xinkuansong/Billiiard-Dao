@@ -64,11 +64,9 @@
 ### 时序与状态约束
 
 - **事件优先级顺序**：必须严格遵循，同时刻事件按优先级处理
-  - 优先级 -1：重叠分离（最高优先级）
-  - 优先级 0：碰撞事件（球-球、球-库边）
-  - 优先级 1：滑动→滚动转换
-  - 优先级 2：滚动→旋转转换、进袋事件
-  - 优先级 3：旋转→静止转换（最低优先级）
+  - 优先级 -1：重叠分离（仅用于已重叠的即时纠正）
+  - 优先级 2：状态转换、进袋事件（与 pooltool tier 2 对齐）
+  - 优先级 3：碰撞事件（球-球、球-库边，与 pooltool tier 3 对齐）
 - **状态转换顺序**：球状态必须按以下顺序转换，不可跳跃
   - `sliding` → `rolling` → `spinning` → `stationary`
   - `pocketed` 为终止状态，不可转换回其他状态
@@ -84,13 +82,13 @@
 | **静止判定阈值** | speed < 0.005 m/s && angularSpeed < 0.1 rad/s | 速度和角速度双阈值 | 影响球停止判定，阈值过小可能导致永远不停 |
 | **零时刻事件保护阈值** | streak > 80 | 连续零时刻事件计数 | 影响模拟稳定性，阈值过小可能误触发微调 |
 | **零时刻微调时间** | 0.0005s | 避免卡死的最小时间步 | 影响模拟精度，过大可能导致时间跳跃 |
-| **事件优先级** | -1, 0, 1, 2, 3 | 事件处理顺序 | 影响事件处理逻辑，不可随意调整 |
+| **事件优先级** | -1, 2, 3 | 事件处理顺序（-1 为重叠纠正特例） | 影响事件处理逻辑，不可随意调整 |
 | **QuarticSolver 退化判定** | 1e-12 | 四次方程退化系数阈值 | 影响方程类型判断，过小可能误判 |
 | **QuarticSolver 收敛判定** | 1e-14 | Newton-Raphson 迭代收敛阈值 | 影响根精度，过小可能导致不收敛 |
 | **QuarticSolver 残差阈值** | 1e-6 | 根验证残差阈值 | 影响根有效性判断，过大可能接受错误根 |
 | **QuarticSolver 迭代次数** | 8 | Newton-Raphson 最大迭代次数 | 影响计算性能，过小可能精度不足 |
 | **CollisionDetector 时间 epsilon** | 1e-6s | 碰撞时间比较阈值 | 影响事件去重，过小可能导致重复事件 |
-| **CollisionDetector 库边接触误差** | 0.05m | 圆形库边接触判定容差 | 影响库边碰撞检测，过大可能误检 |
+| **CollisionDetector 圆弧根筛选** | 径向进入 + 角度范围 | 与 pooltool quartic 最小正实根语义保持一致，避免额外启发式误杀 | 影响角袋附近碰撞检出率 |
 | **CushionCollisionModel 最大步数** | 5000 | 积分最大步数 | 影响计算性能，过小可能积分不完整 |
 | **CushionCollisionModel 积分步长** | 0.0001s | 积分时间步长 | 影响积分精度，过大可能导致能量异常 |
 
@@ -123,12 +121,12 @@
 事件类型                优先级    触发条件
 ─────────────────────────────────────────────
 重叠分离                -1        球心距离 < 2*radius
-球-球碰撞               0         两球轨迹相交
-球-库边碰撞             0         球与库边轨迹相交
-滑动→滚动转换           1         relSpeed <= 0.03
+滑动→滚动转换           2         relSpeed <= 0.03
 滚动→旋转转换           2         speed < 0.005 && angularSpeed >= 0.1
 进袋事件                2         球心到袋口距离 < pocketRadius
-旋转→静止转换           3         angularSpeed < 0.1
+旋转→静止转换           2         angularSpeed < 0.1
+球-球碰撞               3         两球轨迹相交
+球-库边碰撞             3         球与库边轨迹相交
 ```
 
 ## 错误处理与降级策略
@@ -176,11 +174,21 @@
 | `QuarticSolver.swift` | `pooltool/physics/evolution/event_based/solve.py` | 算法一致，Ferrari 方法 + Newton-Raphson 抛光 |
 | `CollisionDetector.swift` | `pooltool/physics/evolution/event_based/solve.py` | 球-球碰撞时间求解公式一致，库边碰撞使用圆形近似 |
 | `AnalyticalMotion.swift` | `pooltool/physics/evolution/event_based/evolution.py` | 滑动/滚动/旋转解析方程一致，状态转换时间计算一致 |
-| `EventDrivenEngine.swift` | `pooltool/physics/evolution/event_based/evolution.py` | 事件驱动流程一致，优先级顺序一致 |
+| `EventDrivenEngine.swift` | `pooltool/physics/evolution/event_based/evolution.py` | 事件驱动流程与优先级分层对齐（transition/pocket tier 2，collision tier 3） |
+| `EventDrivenEngine.makeBallBallKiss()` | `pooltool/physics/resolve/ball_ball/core.py CoreBallBallCollision.make_kiss` | 与 pooltool 对齐：碰撞解算前沿接触法线精确分离至 `2R + MIN_DIST`，主路径用二次方程求 δt，fallback 用对称推离 |
+| `EventDrivenEngine.makeBallCushionKiss()` | `pooltool/physics/resolve/ball_cushion/core.py CoreBallLCushionCollision.make_kiss` | 与 pooltool 对齐：库碰撞解算前沿法线将球推至距库面 `R + spacer`；Linear cushion 用最近点投影，Circular cushion 用圆心距修正 |
 | `CushionCollisionModel.swift` | `pooltool/physics/evolution/event_based/cushion.py` | Mathavan 2010 模型一致，积分方法一致 |
 | `CollisionResolver.swift` | `pooltool/physics/evolution/event_based/resolve.py` | Alciatore 球-球碰撞模型一致，库边碰撞解析一致 |
 | `CueBallStrike.swift` | `pooltool/physics/stick_ball/instantaneous_point.py` | instantaneous_point 模型一致，squirt 计算一致 |
 | `BallMotionState.swift` | `pooltool/physics/evolution/event_based/state.py` | 状态定义一致，转换条件一致 |
+
+### 重要偏离说明
+
+#### `make_kiss` 中的 spacer 值选择
+
+- pooltool ball-ball: `spacer = const.MIN_DIST`（约 1e-6 m）；Swift: `spacer = 1e-5 m`（略大以吸收 Float32 精度损失）。
+- pooltool cushion: `spacer = 1e-9 m`；Swift: `spacer = 1e-6 m`（同样因 Float32 精度取更保守值）。
+- 选用更大 spacer 是合理的：Float32 的机器精度约 1.2e-7，使用 1e-9 的 spacer 在乘以 R≈0.03 后实际精度无法保证，改用 1e-5/1e-6 可靠地防止碰后重新触发碰撞检测。
 
 ## 设计决策记录（ADR）
 
@@ -208,8 +216,8 @@
 - **候选方案**：
   1. 按事件类型固定优先级：简单，但可能不符合物理直觉
   2. 动态优先级：灵活，但实现复杂
-- **结论**：采用固定优先级（-1 到 3），确保重叠分离优先于碰撞，碰撞优先于状态转换
-- **后果**：某些边界情况可能需要特殊处理，但整体逻辑清晰
+- **结论**：采用固定优先级并对齐 pooltool 分层：重叠纠正为特例（-1），transition/pocket 为 2，collision 为 3
+- **后果**：同刻事件的解算顺序与 pooltool 一致，降低跨实现行为漂移风险
 
 ### ADR-004：零时刻事件保护机制
 
@@ -221,7 +229,71 @@
 - **结论**：采用时间微调（0.0005s）+ 强制分离的组合策略，阈值设为 80 次
 - **后果**：极端情况下可能略微偏离真实物理，但保证模拟稳定性
 
-### ADR-005：角袋几何从单圆心模型升级为 CAD 精确双圆心 + jaw 直线模型
+### ADR-006：碰撞解算前的 `make_kiss` 位置纠正
+
+- **背景**：性能优化后发现球-球重叠和穿库现象
+- **根因**：事件演化（`evolveAllBalls`）使用解析运动推进球到碰撞时刻，但浮点误差会使球微量穿入对方或库面；直接在穿透状态下应用碰撞冲量后，反向速度仍可能指向穿透方向，导致下一步检测时重复触发零时刻事件
+- **pooltool 参考**：`pooltool/physics/resolve/ball_ball/core.py CoreBallBallCollision.make_kiss` 和 `ball_cushion/core.py CoreBallLCushionCollision.make_kiss`，碰撞解算前统一执行精确位置纠正
+- **Swift 实现**：
+  - `EventDrivenEngine.makeBallBallKiss()`：解二次方程求 δt，将双球精确置于 `2R + 1e-5` 处；中点偏移过大时降级为对称推离
+  - `EventDrivenEngine.makeBallCushionKiss()`：按库面类型（Linear / Circular）将球推至距库面 `R + 1e-6`
+- **性能影响**：O(1) per event，不改变整体 O(n²) 扫描结构
+
+#### `refineRoot` 残差门限
+
+- **原值**：`1e-6`（相对于最大项幅度），8 次迭代
+- **现值**：`1e-4`（相对于最大项幅度），12 次迭代，追踪最优结果
+- **理由**：对 `t≈4s` 的大根，多项式各项幅度约 3.75，浮点残差本身约 `1e-5`，旧门限会过滤有效根。新门限 `1e-4` 对真正假根（残差幅度 >> 多项式值）仍能过滤。
+
+#### 四次方程退化降阶已移除
+
+- **原行为**：当 `|a| < 1e-6 × scale` 时，`ballBallCollisionTime` 退化为二次/三次方程求解。
+- **问题**：两个 rolling 球加速度方向接近平行时 `daDotDa` 极小，但 `b = daDotDv` 未必小，丢掉 `b·t³` 项导致漏根。
+- **现行为**：始终走完整四次方程，与 pooltool 一致（pooltool 从不做退化处理）。
+
+### ADR-007：移除 ball-ball 方向裁剪与空间距离裁剪
+
+- **背景**：曾实现三层裁剪：(1) `maxReach` 空间距离估算裁剪、(2) rolling-rolling 方向背离裁剪（含加速度预判）、(3) rolling vs nontranslating 角度裁剪。这些裁剪曾导致合法碰撞漏检，表现为球-球重叠穿模。
+- **pooltool 参考**：`skip_ball_ball_collision` 函数存在于 pooltool 代码中，但**主仿真循环 `get_next_ball_ball_collision` 从未调用它**。pooltool 主要靠 cache 避免重算，不依赖方向裁剪。
+- **决策**：移除上述三层裁剪，仅保留与 pooltool 对齐的两项判断：(a) 双静止/自旋球对跳过（nontranslating 判断）、(b) 已重叠立即触发。无效球对由四次方程求解器通过 `maxTime` 参数自然截断（返回 `nil`），并写入 negative cache，下次直接跳过。
+- **正确性影响**：消除漏检风险，球-球重叠问题随之减少。
+- **性能影响**：16 球场景 C(16,2)=120 对，每对最多调用一次四次方程（O(1) 计算），缓存命中后跳过。相比裁剪带来的错误，轻微性能增加是可接受的代价。
+
+### ADR-008：`dynamicMaxTime` 和短视野参数调整
+
+- **背景**：短视野窗口与弧库可达性预裁剪会过滤合法碰撞，表现为漏检后重叠/穿库
+- **根因**：`dynamicMaxTime` 和 `maxReach` 预裁剪属于启发式，不是 pooltool 主流程；当碰撞发生在裁剪窗口外时会被错误跳过
+- **调整**：移除 `dynamicMaxTime` 截断和弧库 `maxReach` 预裁剪，统一使用 `maxTimeRemaining` 作为检测时间窗
+- **性能影响**：高速度阶段求解次数略增；但缓存仍生效，且正确性优先于启发式剪枝
+
+### ADR-009：近同时刻事件排序与 fallback 门控修正
+
+- **背景**：日志出现“在 transition 事件后立刻出现大重叠（>5mm）”的模式，且多发生在 rolling/sliding 球撞 stationary/spinning 球附近。
+- **根因 1（排序）**：`PhysicsEvent` 的“同刻判定”容差过大（`1e-4s`），会把仅相差几十微秒的事件当作同刻，再按 priority 重排，导致近同时刻 collision 被 transition 抢先处理。
+- **根因 2（fallback 门控）**：`shouldRunFallbackBallBallCheck` 对部分近距离 translating↔nontranslating 球对过于保守，quartic 漏根时未触发 fallback。
+- **调整**：
+  1. 同刻容差收紧到 `1e-7s`，减少“伪同刻”重排；
+  2. 对 translating↔nontranslating 且近场（`dist - 2R < 0.20m`）球对，放宽 fallback 门控。
+- **预期效果**：降低“transition 后突发重叠”和 `unknown-missed` 类型漏检，减少 `separateOverlappingBalls` 的大幅纠正次数。
+
+#### ADR-009A：进一步压缩重叠峰值（亚毫米目标）
+
+- **背景**：修复后最大重叠已从厘米级降到毫米级，但仍有 `0.5mm+` 峰值。
+- **调整**：
+  1. `isBallPairOverlappingOrTouching` 的“无条件立即解算”阈值从 `0.1mm` 收紧到 `0.01mm`；
+  2. “刚接触且靠近”阈值从 `relV·n < -0.008` 放宽到 `relV·n < -0.002`；
+  3. `shouldRunFallbackBallBallCheck` 新增通用近场分支：`gap < 0.08m` 且有平动时允许 fallback（覆盖 rolling-rolling / rolling-spinning 漏根）。
+- **预期效果**：进一步降低 post-evolve overlap 峰值，减少 `unknown-missed` 和 `all-culls-passed-quartic-missed` 对应的大幅分离修正。
+
+#### ADR-009B：fallback 近场短视窗约束（抑制远场假阳性）
+
+- **背景**：日志出现 `quarticMiss+fallbackHit` 的远距离命中（如 `dist > 1m`），导致事件序列失真并触发大重叠。
+- **根因**：fallback 基于常加速度近似，适合近场补救；用于远场/长时预测时会产生非物理假碰撞。
+- **调整**：
+  1. `shouldRunFallbackBallBallCheck` 增加远场拒绝：`gap > 0.35m` 直接不跑 fallback；
+  2. 门控可达性计算的时间窗限制为 `min(maxTime, 0.6s)`；
+  3. `fallbackBallBallCollisionTime` 求解 horizon 限制为 `min(maxTime, stateHorizon, 0.6s)`。
+- **预期效果**：消除远场 fallback 假阳性，避免错误碰撞事件污染后续事件链与状态演化。
 
 - **背景**：原实现对每个角袋使用单一圆弧圆心（playfield 角点偏移 R），两条 jaw 弧共享圆心，无 jaw 直线段。CAD 精确数据显示实际为两个独立圆弧（长边侧和短边侧各一个圆心，相距 >100mm）加两条 jaw 直线段
 - **变更内容**：
@@ -236,6 +308,6 @@
 - **对 EventDrivenEngine 的影响**：
   - `linearCushions.count` 从 6 增至 14（6 主库边 + 8 jaw 线），圆弧索引自动偏移
   - 已验证 engine 遍历完整数组、cushionIndex 动态映射、priority 排序正确
-  - jaw 碰撞优先级 = 0（与主库边相同），高于 pocket 事件优先级 = 2
+  - jaw 碰撞优先级 = 3（与主库边同层，按 pooltool collision tier），进袋事件优先级 = 2
 - **几何一致性断言**：初始化时验证弧端点距离 ≈ R、相邻段端点重合、jaw 法线单位化且指向台内
 - **后果**：角袋区域碰撞检测精度提升，反弹法线准确性提升。风险点为 pocket 事件可能在极端角度下抢先于 jaw 碰撞（已有 priority 缓解）

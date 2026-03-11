@@ -349,6 +349,11 @@ final class RenderQualityManager {
     /// Feed frame times during recovery evaluation. Returns true if tier changed.
     func evaluateRecoveryFrame(_ dt: CFTimeInterval) -> Bool {
         guard pendingRecovery else { return false }
+        // 已经在目标档位，无需恢复
+        guard currentTier < deviceTier else {
+            pendingRecovery = false
+            return false
+        }
         let now = CACurrentMediaTime()
         guard now >= recoveryEvalStart else { return false }
 
@@ -359,8 +364,10 @@ final class RenderQualityManager {
         recoveryFrameTimes.removeAll()
         pendingRecovery = false
 
-        let threshold = upgradeThreshold(for: currentTier) - 6.0
-        if avgFPS > threshold, currentTier < deviceTier {
+        // upgradeThreshold 对 .high 返回 greatestFiniteMagnitude（无需升级），
+        // 此处直接使用固定 42fps 作为恢复门槛，避免溢出问题
+        let threshold = 42.0
+        if avgFPS > threshold {
             recentFrameTimes.clear()
             consecutiveLowFPSWindows = 0
             consecutiveHighFPSWindows = 0

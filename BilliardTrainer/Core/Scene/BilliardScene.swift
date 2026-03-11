@@ -75,8 +75,18 @@ class BilliardScene: SCNScene {
     /// 球影节点
     private var shadowNodes: [String: SCNNode] = [:]
     
-    /// 预测轨迹节点（母球碰后路径 + 目标球路径）
-    private var predictedTrajectoryNodes: [SCNNode] = []
+    /// 预测轨迹节点复用池 —— 拆分为 cue 池和 target 池，彻底避免 geometry 切换
+    /// cue pool：白色 dot（母球路径）
+    private var cueDotNodes: [SCNNode] = []
+    private var cueDotVisible: [Bool] = []
+    /// target pool：黄色 dot（目标球路径）
+    private var targetDotNodes: [SCNNode] = []
+    private var targetDotVisible: [Bool] = []
+    /// 当前激活的 dot 数量（仅用于统计，不再需要 activeDotCount）
+    private var activeDotCount: Int = 0
+    /// 复用池共享的 geometry（白色 dot 和黄色 dot 各一份）
+    private var cueBallDotGeometry: SCNSphere?
+    private var targetBallDotGeometry: SCNSphere?
     
     /// 当前视角模式
     private(set) var currentCameraMode: CameraMode = .aim {
@@ -137,6 +147,89 @@ class BilliardScene: SCNScene {
         setupLights()
         setupCamera()
         setupPhysics()
+        prewarmTrajectoryDotPool()
+        prewarmAimLine()
+        // Metal pipeline warm-up：在 scene 首次渲染后的下一帧显示节点触发 shader 编译
+        // 需要由外部在 CADisplayLink 第1帧回调时调用 triggerMetalPipelineWarmup()
+    }
+    
+    /// 预热瞄准线节点，isHidden=true 初始隐藏
+    private func prewarmAimLine() {
+        guard aimLineNode == nil else { return }
+        let lineGeometry = SCNCylinder(radius: 0.0015, height: 1.0)
+        let material = SCNMaterial()
+        material.diffuse.contents = UIColor.white.withAlphaComponent(0.8)
+        material.emission.contents = UIColor.white.withAlphaComponent(0.3)
+        lineGeometry.materials = [material]
+        let node = SCNNode(geometry: lineGeometry)
+        node.isHidden = true
+        rootNode.addChildNode(node)
+        aimLineNode = node
+    }
+
+    /// 触发 Metal pipeline warm-up：让所有预热节点显示一帧，触发 shader 编译，
+    /// 下一帧立即隐藏。由 BilliardSceneView CADisplayLink 第1帧时调用。
+    func triggerMetalPipelineWarmup() {
+        aimLineNode?.isHidden = false
+        cueDotNodes.forEach { $0.isHidden = false }
+        targetDotNodes.forEach { $0.isHidden = false }
+
+        // 等待 2 帧后隐藏：第1帧 Metal 提交 draw call 编译 shader，第2帧确认完成后隐藏
+        var framesLeft = 2
+        func hideAfterFrames() {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                framesLeft -= 1
+                if framesLeft > 0 {
+                    hideAfterFrames()
+                    return
+                }
+                self.aimLineNode?.isHidden = true
+                for (i, node) in self.cueDotNodes.enumerated() where !self.cueDotVisible[i] {
+                    node.isHidden = true
+                }
+                for (i, node) in self.targetDotNodes.enumerated() where !self.targetDotVisible[i] {
+                    node.isHidden = true
+                }
+            }
+        }
+        hideAfterFrames()
+    }
+
+    /// 预热轨迹预测 dot 节点池，避免首次击球时冷启动卡顿
+    /// cue pool 和 target pool 各预分配 100 个节点，彻底避免 geometry 切换
+    private func prewarmTrajectoryDotPool() {
+        if cueBallDotGeometry == nil {
+            let g = SCNSphere(radius: 0.003)
+            let m = SCNMaterial()
+            m.diffuse.contents = UIColor.white.withAlphaComponent(0.5)
+            m.emission.contents = UIColor.white.withAlphaComponent(0.1)
+            g.materials = [m]
+            cueBallDotGeometry = g
+        }
+        if targetBallDotGeometry == nil {
+            let g = SCNSphere(radius: 0.003)
+            let m = SCNMaterial()
+            m.diffuse.contents = UIColor.yellow.withAlphaComponent(0.6)
+            m.emission.contents = UIColor.yellow.withAlphaComponent(0.15)
+            g.materials = [m]
+            targetBallDotGeometry = g
+        }
+        // isHidden=true 初始隐藏，Metal warmup 时由 triggerMetalPipelineWarmup 统一处理
+        while cueDotNodes.count < 100 {
+            let node = SCNNode(geometry: cueBallDotGeometry)
+            node.isHidden = true
+            rootNode.addChildNode(node)
+            cueDotNodes.append(node)
+            cueDotVisible.append(false)
+        }
+        while targetDotNodes.count < 100 {
+            let node = SCNNode(geometry: targetBallDotGeometry)
+            node.isHidden = true
+            rootNode.addChildNode(node)
+            targetDotNodes.append(node)
+            targetDotVisible.append(false)
+        }
     }
     
     /// 两层地面：Layer 1 unlit 视觉面 + Layer 2 shadow catcher
@@ -1196,7 +1289,9 @@ class BilliardScene: SCNScene {
         }
         sanitizeBallLayout()
         for (key, node) in allBallNodes where !node.isHidden {
-            newInitial[key] = node.position
+            // Store visualCenter (world coords) so that buildEngine and resetScene both
+            // use the same coordinate frame as visualCenter(of:).
+            newInitial[key] = visualCenter(of: node)
         }
         initialBallPositions = newInitial
         targetBallNodes = allBallNodes
@@ -1703,12 +1798,14 @@ class BilliardScene: SCNScene {
     }
 
     /// 显示瞄准线
+    /// 使用固定 height=1.0 的 geometry + scale.y 控制实际长度，
+    /// 避免修改 cylinder.height 触发 GPU VBO 重建（每次改 height 约 6-8ms 峰值）
     func showAimLine(from start: SCNVector3, direction: SCNVector3, length: Float) {
         let lineNode: SCNNode
         if let existing = aimLineNode {
             lineNode = existing
         } else {
-            let lineGeometry = SCNCylinder(radius: 0.0015, height: CGFloat(length))
+            let lineGeometry = SCNCylinder(radius: 0.0015, height: 1.0)
             let material = SCNMaterial()
             material.diffuse.contents = UIColor.white.withAlphaComponent(0.8)
             material.emission.contents = UIColor.white.withAlphaComponent(0.3)
@@ -1719,10 +1816,9 @@ class BilliardScene: SCNScene {
             lineNode = node
         }
 
-        if let cylinder = lineNode.geometry as? SCNCylinder {
-            cylinder.height = CGFloat(length)
-        }
-
+        // 通过 scale.y 控制长度，geometry 固定不变，zero GPU buffer rebuild
+        lineNode.scale = SCNVector3(1, length, 1)
+        // position 中心点沿方向偏移半长
         lineNode.position = start + direction * (length / 2)
         
         // 旋转使圆柱体指向方向
@@ -1745,71 +1841,128 @@ class BilliardScene: SCNScene {
     ///   - cueBallPath: 母球碰后预测路径点
     ///   - targetBallPath: 目标球预测路径点（可选）
     func showPredictedTrajectory(cueBallPath: [SCNVector3], targetBallPath: [SCNVector3]?) {
-        hidePredictedTrajectory()
-        
-        // 母球碰后路径 — 白色虚线
-        if cueBallPath.count >= 2 {
-            let nodes = createDottedLine(
-                points: cueBallPath,
-                color: UIColor.white.withAlphaComponent(0.5),
-                dotRadius: 0.003,
-                dotSpacing: 0.03
-            )
-            predictedTrajectoryNodes.append(contentsOf: nodes)
+        // 收集本次所有点：先计算需要多少 dot
+        var positions: [(pos: SCNVector3, isCue: Bool)] = []
+        collectDots(from: cueBallPath, spacing: 0.03, isCue: true, into: &positions, maxDots: 100)
+        if let tp = targetBallPath {
+            collectDots(from: tp, spacing: 0.03, isCue: false, into: &positions, maxDots: 100)
         }
-        
-        // 目标球路径 — 黄色虚线
-        if let targetPath = targetBallPath, targetPath.count >= 2 {
-            let nodes = createDottedLine(
-                points: targetPath,
-                color: UIColor.yellow.withAlphaComponent(0.6),
-                dotRadius: 0.003,
-                dotSpacing: 0.03
-            )
-            predictedTrajectoryNodes.append(contentsOf: nodes)
+
+        let needed = positions.count
+
+        // 确保共享 geometry 已创建（只创建一次，预热时已处理，这里是兜底）
+        if cueBallDotGeometry == nil {
+            let g = SCNSphere(radius: 0.003)
+            let m = SCNMaterial()
+            m.diffuse.contents = UIColor.white.withAlphaComponent(0.5)
+            m.emission.contents = UIColor.white.withAlphaComponent(0.1)
+            g.materials = [m]
+            cueBallDotGeometry = g
         }
-        
-        for node in predictedTrajectoryNodes {
+        if targetBallDotGeometry == nil {
+            let g = SCNSphere(radius: 0.003)
+            let m = SCNMaterial()
+            m.diffuse.contents = UIColor.yellow.withAlphaComponent(0.6)
+            m.emission.contents = UIColor.yellow.withAlphaComponent(0.15)
+            g.materials = [m]
+            targetBallDotGeometry = g
+        }
+
+        // 分离 cue / target 位置到各自独立列表
+        var cuePositions: [SCNVector3] = []
+        var targetPositions: [SCNVector3] = []
+        for entry in positions {
+            if entry.isCue { cuePositions.append(entry.pos) }
+            else { targetPositions.append(entry.pos) }
+        }
+
+        // 扩充 cue pool（只增不减，triggerMetalPipelineWarmup 已处理过 shader 预热）
+        while cueDotNodes.count < cuePositions.count {
+            let node = SCNNode(geometry: cueBallDotGeometry)
+            node.isHidden = true
             rootNode.addChildNode(node)
+            cueDotNodes.append(node)
+            cueDotVisible.append(false)
         }
-    }
-    
-    /// 隐藏预测轨迹线
-    func hidePredictedTrajectory() {
-        for node in predictedTrajectoryNodes {
-            node.removeFromParentNode()
+        // 扩充 target pool
+        while targetDotNodes.count < targetPositions.count {
+            let node = SCNNode(geometry: targetBallDotGeometry)
+            node.isHidden = true
+            rootNode.addChildNode(node)
+            targetDotNodes.append(node)
+            targetDotVisible.append(false)
         }
-        predictedTrajectoryNodes.removeAll()
-    }
-    
-    /// 创建虚线（一系列小球点组成的路径）
-    private func createDottedLine(points: [SCNVector3], color: UIColor, dotRadius: CGFloat, dotSpacing: Float) -> [SCNNode] {
-        var nodes: [SCNNode] = []
-        let dotGeometry = SCNSphere(radius: dotRadius)
-        let material = SCNMaterial()
-        material.diffuse.contents = color
-        material.emission.contents = color.withAlphaComponent(0.2)
-        dotGeometry.materials = [material]
-        
-        for i in 0..<(points.count - 1) {
-            let start = points[i]
-            let end = points[i + 1]
-            let segment = end - start
-            let segmentLength = segment.length()
-            guard segmentLength > 0.001 else { continue }
-            let dir = segment.normalized()
-            
-            var dist: Float = 0
-            while dist < segmentLength {
-                let pos = start + dir * dist
-                let dotNode = SCNNode(geometry: dotGeometry)
-                dotNode.position = pos
-                nodes.append(dotNode)
-                dist += dotSpacing
+
+        // 更新 cue pool：position 直接写，isHidden 仅在状态变化时写
+        for (i, pos) in cuePositions.enumerated() {
+            cueDotNodes[i].position = pos
+            if !cueDotVisible[i] {
+                cueDotNodes[i].isHidden = false
+                cueDotVisible[i] = true
             }
         }
-        
-        return nodes
+        for i in cuePositions.count..<cueDotNodes.count {
+            if cueDotVisible[i] {
+                cueDotNodes[i].isHidden = true
+                cueDotVisible[i] = false
+            }
+        }
+
+        // 更新 target pool
+        for (i, pos) in targetPositions.enumerated() {
+            targetDotNodes[i].position = pos
+            if !targetDotVisible[i] {
+                targetDotNodes[i].isHidden = false
+                targetDotVisible[i] = true
+            }
+        }
+        for i in targetPositions.count..<targetDotNodes.count {
+            if targetDotVisible[i] {
+                targetDotNodes[i].isHidden = true
+                targetDotVisible[i] = false
+            }
+        }
+
+        activeDotCount = needed
+    }
+    
+    /// 隐藏预测轨迹线（节点留在池中，下次复用）
+    func hidePredictedTrajectory() {
+        for i in 0..<cueDotNodes.count where cueDotVisible[i] {
+            cueDotNodes[i].isHidden = true
+            cueDotVisible[i] = false
+        }
+        for i in 0..<targetDotNodes.count where targetDotVisible[i] {
+            targetDotNodes[i].isHidden = true
+            targetDotVisible[i] = false
+        }
+        activeDotCount = 0
+    }
+    
+    /// 计算路径点序列对应的 dot 位置列表（不创建节点）
+    private func collectDots(
+        from points: [SCNVector3],
+        spacing: Float,
+        isCue: Bool,
+        into result: inout [(pos: SCNVector3, isCue: Bool)],
+        maxDots: Int = 100
+    ) {
+        guard points.count >= 2 else { return }
+        let startCount = result.count
+        for i in 0..<(points.count - 1) {
+            guard result.count - startCount < maxDots else { break }
+            let start = points[i]
+            let end = points[i + 1]
+            let seg = end - start
+            let segLen = seg.length()
+            guard segLen > 0.001 else { continue }
+            let dir = seg.normalized()
+            var dist: Float = 0
+            while dist < segLen && result.count - startCount < maxDots {
+                result.append((pos: start + dir * dist, isCue: isCue))
+                dist += spacing
+            }
+        }
     }
     
     /// 显示幽灵球
@@ -2180,8 +2333,10 @@ class BilliardScene: SCNScene {
                 ball.opacity = 1.0  // 恢复透明度（进袋时会淡出）
             }
             
-            // 恢复初始位置
-            ball.position = position
+            // initialBallPositions stores world-space visualCenter coords (set via
+            // alignVisualCenter in applyBallLayout), so restore using alignVisualCenter
+            // to keep node.position and visualCenter in sync.
+            alignVisualCenter(of: ball, to: position)
         }
         
         // 重新填充 targetBallNodes（进袋时会被移除）
@@ -2196,7 +2351,8 @@ class BilliardScene: SCNScene {
         for (name, shadow) in shadowNodes {
             shadow.isHidden = false
             if let ball = allBallNodes[name] {
-                shadow.position = SCNVector3(ball.position.x, TablePhysics.height + Self.contactShadowYOffset, ball.position.z)
+                let center = visualCenter(of: ball)
+                shadow.position = SCNVector3(center.x, TablePhysics.height + Self.contactShadowYOffset, center.z)
             }
         }
         
